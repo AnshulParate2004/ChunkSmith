@@ -35,6 +35,21 @@ class FileHandler:
         """Save LangChain documents to JSON"""
         Path(filepath).parent.mkdir(parents=True, exist_ok=True)
         
+            #     doc = Document(
+            #     page_content=combined_content,
+            #     metadata={
+            #         "chunk_index": i,
+            #         "original_text": content_data['text'],
+            #         "raw_tables_html": content_data['tables'],
+            #         "ai_questions": ai_response.question,
+            #         "ai_summary": ai_response.summary,
+            #         "image_interpretation": ai_response.image_interpretation,
+            #         "table_interpretation": ai_response.table_interpretation,
+            #         "image_paths": content_data['images_dirpath'],
+            #         "page_numbers": content_data['page_no'],
+            #         "content_types": content_data['types'],
+            #     }
+            # )
         # Convert documents to clean JSON format
         clean_json = [
             {
@@ -42,6 +57,10 @@ class FileHandler:
                 "enhanced_content": doc.page_content,
                 "original_text": doc.metadata.get("original_text", ""),
                 "raw_tables_html": doc.metadata.get("raw_tables_html", []),
+                "ai_questions": doc.metadata.get("ai_questions", ""),
+                "ai_summary": doc.metadata.get("ai_summary", ""),
+                "image_interpretation": doc.metadata.get("image_interpretation", ""),
+                "table_interpretation": doc.metadata.get("table_interpretation", ""),
                 "image_paths": doc.metadata.get("image_paths", []),
                 "page_numbers": doc.metadata.get("page_numbers", []),
                 "content_types": doc.metadata.get("content_types", []),
