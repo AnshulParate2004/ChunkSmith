@@ -8,6 +8,9 @@ from api.routes import router
 from config.settings import settings
 import os
 from dotenv import load_dotenv
+import pytesseract
+
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
 # Load the .env file (adjust path if needed)
 load_dotenv(r"D:\MultiModulRag\.env")
