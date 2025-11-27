@@ -1,7 +1,6 @@
 """Content processing module for AI-enhanced summarization"""
 import os
 import base64
-import time
 from pathlib import Path
 from typing import List, Dict
 from langchain_core.documents import Document
@@ -24,7 +23,7 @@ class AIParser(BaseModel):
 class ContentProcessor:
     """Processes document chunks with AI-enhanced summaries"""
     
-    def __init__(self, image_dir: str, model_name: str = "gemini-2.0-flash-exp", temperature: float = 0):
+    def __init__(self, image_dir: str, model_name: str = "gemini-2.5-pro", temperature: float = 0):
         self.image_dir = image_dir
         self.model_name = model_name
         self.temperature = temperature
@@ -168,62 +167,27 @@ class ContentProcessor:
 
         return content_data
     
-    def _is_rate_limit_error(self, error_str: str) -> bool:
-        """Check if error is a rate limit error"""
-        rate_limit_keywords = [
-            "rate limit",
-            "quota",
-            "429",
-            "resource_exhausted",
-            "too many requests",
-            "quota exceeded",
-            "resourceexhausted",
-            "rate_limit_exceeded"
-        ]
-        error_lower = error_str.lower()
-        return any(keyword in error_lower for keyword in rate_limit_keywords)
-    
-    def _is_api_key_error(self, error_str: str) -> bool:
-        """Check if error is an API key error"""
-        api_key_keywords = [
-            "api key not valid",
-            "api_key_invalid",
-            "invalid api key",
-            "unauthorized",
-            "authentication failed",
-            "invalid credentials"
-        ]
-        error_lower = error_str.lower()
-        return any(keyword in error_lower for keyword in api_key_keywords)
-    
     def create_ai_enhanced_summary(
         self, 
         text: str, 
         tables: List[str], 
-        images: List[str],
-        max_retries: int = 5,
-        initial_wait: float = 2.0,
-        max_wait: float = 60.0
+        images: List[str]
     ) -> AIParser:
         """
-        Create AI-enhanced summary with exponential backoff retry logic
+        Create AI-enhanced summary (simplified - no retry logic)
         
         Args:
             text: Text content to summarize
             tables: List of HTML tables
             images: List of base64 encoded images
-            max_retries: Maximum number of retry attempts (default: 5)
-            initial_wait: Initial wait time in seconds (default: 2.0)
-            max_wait: Maximum wait time between retries (default: 60.0)
         
         Returns:
             AIParser object with structured summary
         """
         
-        for attempt in range(max_retries):
-            try:
-                # Build prompt
-                prompt_text = f"""You are creating a searchable description for document content retrieval.
+        try:
+            # Build prompt
+            prompt_text = f"""You are creating a searchable description for document content retrieval.
 
 CONTENT TO ANALYZE:
 
@@ -231,13 +195,13 @@ TEXT CONTENT:
 {text}
 
 """
-                
-                if tables:
-                    prompt_text += "TABLES:\n"
-                    for i, table in enumerate(tables, 1):
-                        prompt_text += f"Table {i}:\n{table}\n\n"
-                
-                prompt_text += """
+            
+            if tables:
+                prompt_text += "TABLES:\n"
+                for i, table in enumerate(tables, 1):
+                    prompt_text += f"Table {i}:\n{table}\n\n"
+            
+            prompt_text += """
 YOUR TASK:
 Generate a comprehensive, searchable description that covers:
 
@@ -257,73 +221,37 @@ IMPORTANT: Return structured output with these fields:
 - table_interpretation: Description of tables (or "***DO NOT USE THIS TABLE***" if irrelevant)
 """
 
-                message_content = [{"type": "text", "text": prompt_text}]
+            message_content = [{"type": "text", "text": prompt_text}]
+            
+            for img_b64 in images:
+                message_content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{img_b64}"}
+                })
+            
+            message = HumanMessage(content=message_content)
+            
+            # Make API call (single attempt, no retry)
+            response = self.llm_structured.invoke([message])
+            return response
                 
-                for img_b64 in images:
-                    message_content.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{img_b64}"}
-                    })
-                
-                message = HumanMessage(content=message_content)
-                
-                # Make API call
-                response = self.llm_structured.invoke([message])
-                
-                # Success! Return response
-                if attempt > 0:
-                    print(f"      ✅ Success after {attempt + 1} attempts")
-                return response
-                
-            except Exception as e:
-                error_str = str(e)
-                
-                # Check if it's an API key error (no point retrying)
-                if self._is_api_key_error(error_str):
-                    print(f"     ❌ API Key Error: {error_str[:150]}")
-                    print(f"     ⚠️  Please check your GOOGLE_API_KEY in .env file")
-                    break  # Don't retry for invalid API key
-                
-                # Check if it's a rate limit error
-                is_rate_limit = self._is_rate_limit_error(error_str)
-                
-                if is_rate_limit:
-                    # Calculate wait time with exponential backoff
-                    wait_time = min(initial_wait * (2 ** attempt), max_wait)
-                    
-                    print(f"     ⚠️  Rate limit hit (attempt {attempt + 1}/{max_retries})")
-                    
-                    if attempt < max_retries - 1:
-                        print(f"     ⏳ Waiting {wait_time:.1f}s before retry...")
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        print(f"     ❌ Max retries reached after rate limits")
-                else:
-                    # Other error
-                    print(f"     ⚠️  Error (attempt {attempt + 1}/{max_retries}): {error_str[:150]}")
-                    
-                    if attempt < max_retries - 1:
-                        # Shorter wait for non-rate-limit errors
-                        wait_time = min(initial_wait * (1.5 ** attempt), 10.0)
-                        print(f"     ⏳ Waiting {wait_time:.1f}s before retry...")
-                        time.sleep(wait_time)
-                        continue
-        
-        # All retries failed - return fallback
-        print(f"     ❌ All {max_retries} attempts failed, using fallback summary")
-        fallback_summary = f"{text[:300]}..."
-        if tables:
-            fallback_summary += f"\n[Contains {len(tables)} table(s)]"
-        if images:
-            fallback_summary += f"\n[Contains {len(images)} image(s)]"
-        
-        return AIParser(
-            question="Unable to generate questions due to processing error",
-            summary=fallback_summary,
-            image_interpretation="***DO NOT USE THIS IMAGE***" if images else "No images present",
-            table_interpretation="***DO NOT USE THIS TABLE***" if tables else "No tables present"
-        )
+        except Exception as e:
+            # Return fallback on any error
+            print(f"     ❌ Error creating AI summary: {str(e)[:150]}")
+            print(f"     ⚠️  Using fallback summary")
+            
+            fallback_summary = f"{text[:300]}..."
+            if tables:
+                fallback_summary += f"\n[Contains {len(tables)} table(s)]"
+            if images:
+                fallback_summary += f"\n[Contains {len(images)} image(s)]"
+            
+            return AIParser(
+                question="Unable to generate questions due to processing error",
+                summary=fallback_summary,
+                image_interpretation="***DO NOT USE THIS IMAGE***" if images else "No images present",
+                table_interpretation="***DO NOT USE THIS TABLE***" if tables else "No tables present"
+            )
     
     def summarise_chunks(self, chunks) -> List[Document]:
         """
@@ -357,15 +285,12 @@ IMPORTANT: Return structured output with these fields:
             if content_data['page_no']:
                 print(f"     Pages: {content_data['page_no']}")
             
-            # Create AI-enhanced summary with retry logic
+            # Create AI-enhanced summary (no retry logic)
             print(f"      Creating AI summary...")
             ai_response = self.create_ai_enhanced_summary(
                 content_data['text'],
                 content_data['tables'], 
-                content_data['image_base64'],
-                max_retries=5,  # Try up to 5 times
-                initial_wait=2.0,  # Start with 2 second wait
-                max_wait=60.0  # Cap at 60 seconds
+                content_data['image_base64']
             )
             print(f"      ✅ AI summary created")
             

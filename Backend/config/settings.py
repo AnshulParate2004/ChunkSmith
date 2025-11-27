@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     LANGUAGES: list = ["eng"]
     
     # AI Model settings
-    GEMINI_MODEL: str = "gemini-2.0-flash-exp"
+    GEMINI_MODEL: str = "gemini-2.5-pro"
     EMBEDDING_MODEL: str = "text-embedding-004"
     TEMPERATURE: float = 0.0
     

@@ -1,12 +1,15 @@
-"""FastAPI routes for document processing with WebSocket streaming"""
+"""FastAPI routes for document processing with Server-Sent Events (SSE)"""
 import os
 import shutil
 import json
 import asyncio
 from datetime import datetime
-from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, List, Dict
+from typing import Optional, List, AsyncGenerator
+import zipfile
+import tempfile
 
 from config.settings import settings
 from core.document_parser import DocumentParser
@@ -16,8 +19,8 @@ from utils.file_helpers import FileHandler
 
 router = APIRouter()
 
-# Store active WebSocket connections
-active_connections: Dict[str, WebSocket] = {}
+# Store processing status for each document
+processing_status = {}
 
 
 class ProcessRequest(BaseModel):
@@ -49,57 +52,14 @@ class SearchRequest(BaseModel):
     document_id: Optional[str] = None
 
 
-async def send_ws_message(document_id: str, message_type: str, data: dict):
-    """Send message to WebSocket client"""
-    if document_id in active_connections:
-        try:
-            await active_connections[document_id].send_json({
-                "type": message_type,
-                "data": data,
-                "timestamp": datetime.now().isoformat()
-            })
-        except Exception as e:
-            print(f"Error sending WebSocket message: {e}")
-
-
-@router.websocket("/ws/{document_id}")
-async def websocket_endpoint(websocket: WebSocket, document_id: str):
-    """
-    WebSocket endpoint for real-time processing updates
-    
-    Connect to this endpoint: ws://localhost:8000/api/ws/{document_id}
-    """
-    await websocket.accept()
-    active_connections[document_id] = websocket
-    
-    try:
-        # Send connection confirmation
-        await websocket.send_json({
-            "type": "connected",
-            "data": {"message": "WebSocket connected", "document_id": document_id}
-        })
-        
-        # Keep connection alive
-        while True:
-            try:
-                # Receive messages from client (optional)
-                data = await websocket.receive_text()
-                # Echo back or handle commands
-                await websocket.send_json({
-                    "type": "echo",
-                    "data": {"received": data}
-                })
-            except WebSocketDisconnect:
-                break
-    
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-    
-    finally:
-        # Cleanup connection
-        if document_id in active_connections:
-            del active_connections[document_id]
-        print(f"WebSocket disconnected: {document_id}")
+async def send_sse_message(message_type: str, data: dict) -> str:
+    """Format SSE message"""
+    message = {
+        "type": message_type,
+        "data": data,
+        "timestamp": datetime.now().isoformat()
+    }
+    return f"data: {json.dumps(message)}\n\n"
 
 
 @router.get("/languages")
@@ -124,7 +84,7 @@ async def get_supported_languages():
 
 
 @router.post("/process-pdf")
-async def process_pdf(
+async def initiate_pdf_processing(
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks = None,
     max_characters: int = settings.MAX_CHARACTERS,
@@ -135,57 +95,15 @@ async def process_pdf(
     languages: str = "english",
 ):
     """
-    Process a PDF document through the entire pipeline with WebSocket streaming
+    Initiate PDF processing and return document_id for SSE streaming
+    
+    After calling this endpoint, connect to /api/process-pdf-stream/{document_id}
+    to receive real-time progress updates via Server-Sent Events
     """
-    
-    # Generate unique document ID
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    document_id = f"{file.filename.replace('.pdf', '')}_{timestamp}"
-    
-    # Start processing in background
-    background_tasks.add_task(
-        process_pdf_task,
-        file,
-        document_id,
-        max_characters,
-        new_after_n_chars,
-        combine_text_under_n_chars,
-        extract_images,
-        extract_tables,
-        languages
-    )
-    
-    return {
-        "success": True,
-        "message": "Processing started",
-        "document_id": document_id,
-        "websocket_url": f"/api/ws/{document_id}"
-    }
-
-
-async def process_pdf_task(
-    file: UploadFile,
-    document_id: str,
-    max_characters: int,
-    new_after_n_chars: int,
-    combine_text_under_n_chars: int,
-    extract_images: bool,
-    extract_tables: bool,
-    languages: str
-):
-    """Background task for PDF processing with WebSocket updates"""
-    
     try:
-        # Step 1: Upload
-        await send_ws_message(document_id, "step", {
-            "step": 1,
-            "name": "upload",
-            "message": f"Uploading file...",
-            "progress": 0
-        })
-        
-        # Reset file pointer
-        await file.seek(0)
+        # Generate unique document ID
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        document_id = f"{file.filename.replace('.pdf', '')}_{timestamp}"
         
         # Save uploaded file
         upload_path = os.path.join(settings.UPLOAD_DIR, f"{document_id}.pdf")
@@ -194,58 +112,196 @@ async def process_pdf_task(
             buffer.write(content)
         
         # Validate PDF
-        is_valid, error_msg = FileHandler.validate_pdf(upload_path, settings.MAX_FILE_SIZE // (1024 * 1024))
+        is_valid, error_msg = FileHandler.validate_pdf(
+            upload_path, 
+            settings.MAX_FILE_SIZE // (1024 * 1024)
+        )
         if not is_valid:
             os.remove(upload_path)
-            await send_ws_message(document_id, "error", {"message": error_msg})
-            return
+            raise HTTPException(status_code=400, detail=error_msg)
         
-        await send_ws_message(document_id, "step", {
+        # Initialize status
+        processing_status[document_id] = {
+            "status": "queued",
+            "progress": 0,
+            "message": "Processing queued"
+        }
+        
+        # Start background processing
+        background_tasks.add_task(
+            process_pdf_background,
+            document_id,
+            upload_path,
+            max_characters,
+            new_after_n_chars,
+            combine_text_under_n_chars,
+            extract_images,
+            extract_tables,
+            languages
+        )
+        
+        return {
+            "success": True,
+            "message": "Processing initiated",
+            "document_id": document_id,
+            "stream_url": f"/api/process-pdf-stream/{document_id}"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/process-pdf-stream/{document_id}")
+async def stream_pdf_processing(document_id: str): 
+    """
+    Stream processing updates via Server-Sent Events (SSE)
+    
+    Connect to this endpoint after initiating processing to receive real-time updates
+    """
+    
+    async def event_generator() -> AsyncGenerator[str, None]:
+        """Generate SSE events for processing updates"""
+        
+        try:
+            # Wait for processing to start
+            max_wait = 30  # 30 seconds timeout
+            waited = 0
+            while document_id not in processing_status and waited < max_wait:
+                await asyncio.sleep(0.5)
+                waited += 0.5
+            
+            if document_id not in processing_status:
+                yield await send_sse_message("error", {
+                    "message": "Processing not found or timed out"
+                })
+                return
+            
+            # Send initial connection message
+            yield await send_sse_message("connected", {
+                "message": "Connected to processing stream",
+                "document_id": document_id
+            })
+            
+            last_status = None
+            
+            # Stream updates
+            while True:
+                if document_id in processing_status:
+                    current_status = processing_status[document_id]
+                    
+                    # Only send if status changed
+                    if current_status != last_status:
+                        yield await send_sse_message("progress", current_status)
+                        last_status = current_status.copy()
+                    
+                    # Check if completed or failed
+                    if current_status.get("status") in ["completed", "failed"]:
+                        # Send final message
+                        if current_status.get("status") == "completed":
+                            yield await send_sse_message("complete", current_status)
+                        else:
+                            yield await send_sse_message("error", current_status)
+                        
+                        # Cleanup after 5 seconds
+                        await asyncio.sleep(5)
+                        if document_id in processing_status:
+                            del processing_status[document_id]
+                        break
+                
+                await asyncio.sleep(1)  # Poll every second
+        
+        except asyncio.CancelledError:
+            # Client disconnected
+            pass
+        except Exception as e:
+            yield await send_sse_message("error", {
+                "message": f"Stream error: {str(e)}"
+            })
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
+    )
+
+
+async def process_pdf_background(
+    document_id: str,
+    upload_path: str,
+    max_characters: int,
+    new_after_n_chars: int,
+    combine_text_under_n_chars: int,
+    extract_images: bool,
+    extract_tables: bool,
+    languages: str
+):
+    """Background task for PDF processing with status updates"""
+    
+    try:
+        # Update status: Starting
+        processing_status[document_id] = {
+            "status": "processing",
             "step": 1,
-            "name": "upload",
-            "message": "File uploaded successfully",
-            "progress": 25
-        })
+            "step_name": "upload",
+            "progress": 5,
+            "message": "📤 File uploaded and validated"
+        }
+        await asyncio.sleep(0.5)  # Brief pause for UI
         
         # Step 2: Parse PDF
-        await send_ws_message(document_id, "step", {
+        processing_status[document_id] = {
+            "status": "processing",
             "step": 2,
-            "name": "parsing",
-            "message": "Parsing PDF document...",
-            "progress": 25
-        })
+            "step_name": "parsing",
+            "progress": 10,
+            "message": "🔍 Step 2: Parsing PDF document..."
+        }
         
         language_list = [lang.strip() for lang in languages.split(',')]
         parser = DocumentParser(image_output_dir=str(settings.IMAGE_DIR))
-        elements = parser.partition_pdf_document(
-            file_path=upload_path,
-            max_characters=max_characters,
-            new_after_n_chars=new_after_n_chars,
-            combine_text_under_n_chars=combine_text_under_n_chars,
-            extract_images=extract_images,
-            extract_tables=extract_tables,
-            languages=language_list
+        
+        # Simulate async behavior for parsing (runs in thread pool)
+        loop = asyncio.get_event_loop()
+        elements = await loop.run_in_executor(
+            None,
+            parser.partition_pdf_document,
+            upload_path,
+            max_characters,
+            new_after_n_chars,
+            combine_text_under_n_chars,
+            extract_images,
+            extract_tables,
+            language_list
         )
         
         checkpoint1_path = os.path.join(settings.PICKLE_DIR, f"{document_id}_checkpoint1.pkl")
         FileHandler.save_pickle(elements, checkpoint1_path)
         
-        await send_ws_message(document_id, "step", {
+        processing_status[document_id] = {
+            "status": "processing",
             "step": 2,
-            "name": "parsing",
-            "message": f"Extracted {len(elements)} elements",
-            "progress": 40,
+            "step_name": "parsing",
+            "progress": 30,
+            "message": f"✅ Extracted {len(elements)} elements",
             "elements_count": len(elements)
-        })
+        }
+        await asyncio.sleep(0.5)
         
         # Step 3: AI Processing
-        await send_ws_message(document_id, "step", {
+        processing_status[document_id] = {
+            "status": "processing",
             "step": 3,
-            "name": "ai_processing",
-            "message": "Processing chunks with AI...",
-            "progress": 40,
+            "step_name": "ai_processing",
+            "progress": 35,
+            "message": "🤖 Step 3: Processing chunks with AI (this may take a while)...",
             "total_chunks": len(elements)
-        })
+        }
         
         processor = ContentProcessor(
             image_dir=str(settings.IMAGE_DIR),
@@ -253,8 +309,12 @@ async def process_pdf_task(
             temperature=settings.TEMPERATURE
         )
         
-        # Process chunks with progress updates
-        documents = await process_chunks_with_updates(processor, elements, document_id)
+        # Process chunks (runs in thread pool)
+        documents = await loop.run_in_executor(
+            None,
+            processor.summarise_chunks,
+            elements
+        )
         
         image_count = len(list(settings.IMAGE_DIR.glob("*.png")))
         
@@ -264,87 +324,69 @@ async def process_pdf_task(
         FileHandler.save_pickle(documents, output_pickle_path)
         FileHandler.save_json(documents, output_json_path)
         
-        await send_ws_message(document_id, "step", {
+        processing_status[document_id] = {
+            "status": "processing",
             "step": 3,
-            "name": "ai_processing",
-            "message": f"Processed {len(documents)} chunks",
-            "progress": 80,
-            "chunks_processed": len(documents)
-        })
+            "step_name": "ai_processing",
+            "progress": 70,
+            "message": f"✅ Processed {len(documents)} chunks",
+            "chunks_processed": len(documents),
+            "images_extracted": image_count
+        }
+        await asyncio.sleep(0.5)
         
         # Step 4: Vector Store
-        await send_ws_message(document_id, "step", {
+        processing_status[document_id] = {
+            "status": "processing",
             "step": 4,
-            "name": "vectorization",
-            "message": "Creating vector embeddings...",
-            "progress": 80
-        })
+            "step_name": "vectorization",
+            "progress": 75,
+            "message": "🔮 Step 4: Creating vector embeddings..."
+        }
         
         vector_store_path = os.path.join(settings.CHROMA_DIR, document_id)
         vector_manager = VectorStoreManager(embedding_model=settings.EMBEDDING_MODEL)
-        vectorstore = vector_manager.create_vector_store(
-            documents=documents,
-            persist_directory=vector_store_path,
-            collection_name=document_id
+        
+        # Create vector store (runs in thread pool)
+        vectorstore = await loop.run_in_executor(
+            None,
+            vector_manager.create_vector_store,
+            documents,
+            vector_store_path,
+            document_id
         )
         
-        await send_ws_message(document_id, "step", {
+        processing_status[document_id] = {
+            "status": "processing",
             "step": 4,
-            "name": "vectorization",
-            "message": "Vector store created",
-            "progress": 100
-        })
+            "step_name": "vectorization",
+            "progress": 95,
+            "message": "✅ Vector store created"
+        }
+        await asyncio.sleep(0.5)
         
         # Complete
-        result = {
-            "success": True,
-            "message": "Document processed successfully",
-            "document_id": document_id,
-            "chunks_processed": len(documents),
-            "images_extracted": image_count,
-            "pickle_path": output_pickle_path,
-            "json_path": output_json_path,
-            "vector_store_path": vector_store_path
-        }
-        
-        await send_ws_message(document_id, "complete", {
-            "message": "Processing complete!",
+        processing_status[document_id] = {
+            "status": "completed",
             "progress": 100,
-            "result": result
-        })
+            "message": "✅ Processing complete!",
+            "result": {
+                "document_id": document_id,
+                "chunks_processed": len(documents),
+                "images_extracted": image_count,
+                "pickle_path": output_pickle_path,
+                "json_path": output_json_path,
+                "vector_store_path": vector_store_path
+            }
+        }
     
     except Exception as e:
-        await send_ws_message(document_id, "error", {
-            "message": str(e),
-            "progress": 0
-        })
+        processing_status[document_id] = {
+            "status": "failed",
+            "progress": 0,
+            "message": f"❌ Error: {str(e)}"
+        }
         print(f"Error processing PDF: {e}")
-
-
-async def process_chunks_with_updates(processor, chunks, document_id):
-    """Process chunks and send WebSocket updates"""
-    documents = []
-    total_chunks = len(chunks)
-    
-    for i, chunk in enumerate(chunks, 1):
-        # Send progress update
-        progress = 40 + int((i / total_chunks) * 40)
-        await send_ws_message(document_id, "chunk_progress", {
-            "current": i,
-            "total": total_chunks,
-            "progress": progress,
-            "message": f"Processing chunk {i}/{total_chunks}"
-        })
-        
-        # Process chunk (synchronous call)
-        # You would need to modify ContentProcessor to work with async
-        # For now, we'll call it synchronously
-        await asyncio.sleep(0)  # Yield control
-    
-    # Process all chunks at once (original behavior)
-    documents = processor.summarise_chunks(chunks)
-    
-    return documents
 
 
 @router.post("/search")
@@ -354,7 +396,10 @@ async def search_documents(request: SearchRequest):
         if request.document_id:
             vector_store_path = os.path.join(settings.CHROMA_DIR, request.document_id)
             if not os.path.exists(vector_store_path):
-                raise HTTPException(status_code=404, detail=f"Document ID '{request.document_id}' not found")
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"Document ID '{request.document_id}' not found"
+                )
             collection_name = request.document_id
         else:
             vector_store_path = str(settings.CHROMA_DIR)
@@ -388,12 +433,70 @@ async def search_documents(request: SearchRequest):
 
 
 @router.get("/documents")
+async def list_processed_documents():
+    """List all processed document IDs"""
+    try:
+        document_ids = []
+        
+        if settings.CHROMA_DIR.exists():
+            for item in settings.CHROMA_DIR.iterdir():
+                if item.is_dir():
+                    document_ids.append(item.name)
+        
+        return {
+            "success": True,
+            "count": len(document_ids),
+            "documents": document_ids
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/documents/{document_id}")
+async def get_document_info(document_id: str):
+    """Get information about a specific document"""
+    try:
+        vector_store_path = os.path.join(settings.CHROMA_DIR, document_id)
+        
+        if not os.path.exists(vector_store_path):
+            raise HTTPException(status_code=404, detail=f"Document '{document_id}' not found")
+        
+        # Load vector store to get document count
+        vector_manager = VectorStoreManager(embedding_model=settings.EMBEDDING_MODEL)
+        vectorstore = vector_manager.load_vector_store(
+            persist_directory=vector_store_path,
+            collection_name=document_id
+        )
+        
+        # Get collection stats
+        collection = vectorstore._collection
+        doc_count = collection.count()
+        
+        # Check for associated files
+        pickle_path = os.path.join(settings.PICKLE_DIR, f"{document_id}_processed.pkl")
+        json_path = os.path.join(settings.JSON_DIR, f"{document_id}_processed.json")
+        
+        return {
+            "success": True,
+            "document_id": document_id,
+            "vector_store_path": vector_store_path,
+            "chunks_count": doc_count,
+            "has_pickle": os.path.exists(pickle_path),
+            "has_json": os.path.exists(json_path),
+            "pickle_path": pickle_path if os.path.exists(pickle_path) else None,
+            "json_path": json_path if os.path.exists(json_path) else None
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/download-all")
 async def download_all_project_data():
     """Download all project data as a zip file"""
-    import zipfile
-    import tempfile
-    from fastapi.responses import FileResponse
-    
     try:
         temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix='.zip')
         
@@ -428,6 +531,49 @@ async def download_all_project_data():
         raise HTTPException(status_code=500, detail=f"Failed to create archive: {str(e)}")
 
 
+@router.delete("/documents/{document_id}")
+async def delete_document(document_id: str):
+    """Delete a specific document and all associated files"""
+    try:
+        deleted_items = []
+        
+        # Delete vector store
+        vector_store_path = os.path.join(settings.CHROMA_DIR, document_id)
+        if os.path.exists(vector_store_path):
+            shutil.rmtree(vector_store_path)
+            deleted_items.append("vector_store")
+        
+        # Delete pickle files
+        for pkl_file in settings.PICKLE_DIR.glob(f"{document_id}*.pkl"):
+            pkl_file.unlink()
+            deleted_items.append(f"pickle/{pkl_file.name}")
+        
+        # Delete JSON files
+        for json_file in settings.JSON_DIR.glob(f"{document_id}*.json"):
+            json_file.unlink()
+            deleted_items.append(f"json/{json_file.name}")
+        
+        # Delete uploaded PDF
+        upload_file = os.path.join(settings.UPLOAD_DIR, f"{document_id}.pdf")
+        if os.path.exists(upload_file):
+            os.remove(upload_file)
+            deleted_items.append("uploaded_pdf")
+        
+        if not deleted_items:
+            raise HTTPException(status_code=404, detail=f"Document '{document_id}' not found")
+        
+        return {
+            "success": True,
+            "message": f"Document '{document_id}' deleted successfully",
+            "deleted_items": deleted_items
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint"""
@@ -436,5 +582,240 @@ async def health_check():
         "upload_dir": str(settings.UPLOAD_DIR),
         "image_dir": str(settings.IMAGE_DIR),
         "chroma_dir": str(settings.CHROMA_DIR),
-        "active_connections": len(active_connections)
+        "api_version": settings.API_VERSION,
+        "active_processing": len(processing_status)
     }
+    
+import base64
+from pathlib import Path
+
+@router.get("/documents/{document_id}/chunks")
+async def view_processed_chunks(
+    document_id: str,
+    include_images: bool = True
+):
+    """
+    View processed chunks for a specific document with optional image inclusion
+    Returns the content of the JSON file containing processed chunks
+    
+    Parameters:
+    - document_id: The document identifier
+    - include_images: Whether to include base64-encoded images (default: True)
+    """
+    try:
+        # Construct the JSON file path
+        json_file_path = os.path.join(settings.JSON_DIR, f"{document_id}_processed.json")
+        
+        # Check if file exists
+        if not os.path.exists(json_file_path):
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Processed chunks not found for document '{document_id}'. JSON file does not exist."
+            )
+        
+        # Read the JSON file
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            chunks_data = json.load(f)
+        
+        # Process images if requested
+        if include_images and isinstance(chunks_data, list):
+            for chunk in chunks_data:
+                if 'image_paths' in chunk and chunk['image_paths']:
+                    chunk['images_base64'] = []
+                    
+                    for image_path in chunk['image_paths']:
+                        # Construct full image path
+                        full_image_path = os.path.join(settings.IMAGE_DIR, Path(image_path).name)
+                        
+                        try:
+                            if os.path.exists(full_image_path):
+                                with open(full_image_path, 'rb') as img_file:
+                                    image_data = img_file.read()
+                                    base64_image = base64.b64encode(image_data).decode('utf-8')
+                                    
+                                    # Get image extension for proper MIME type
+                                    ext = Path(full_image_path).suffix.lower()
+                                    mime_type = 'image/png' if ext == '.png' else 'image/jpeg'
+                                    
+                                    chunk['images_base64'].append({
+                                        'filename': Path(image_path).name,
+                                        'data': f"data:{mime_type};base64,{base64_image}",
+                                        'path': image_path
+                                    })
+                            else:
+                                chunk['images_base64'].append({
+                                    'filename': Path(image_path).name,
+                                    'error': 'Image file not found',
+                                    'path': image_path
+                                })
+                        except Exception as img_error:
+                            chunk['images_base64'].append({
+                                'filename': Path(image_path).name,
+                                'error': str(img_error),
+                                'path': image_path
+                            })
+        
+        # Get file stats
+        file_stats = os.stat(json_file_path)
+        file_size_kb = file_stats.st_size / 1024
+        
+        return {
+            "success": True,
+            "document_id": document_id,
+            "file_path": json_file_path,
+            "file_size_kb": round(file_size_kb, 2),
+            "chunks_count": len(chunks_data) if isinstance(chunks_data, list) else 1,
+            "images_included": include_images,
+            "chunks": chunks_data
+        }
+    
+    except HTTPException:
+        raise
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to parse JSON file: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error reading processed chunks: {str(e)}"
+        )
+
+
+@router.get("/documents/{document_id}/chunks/{chunk_index}")
+async def view_single_chunk(
+    document_id: str, 
+    chunk_index: int,
+    include_images: bool = True
+):
+    """
+    View a specific chunk by index from processed document with optional images
+    
+    Parameters:
+    - document_id: The document identifier
+    - chunk_index: The index of the chunk (0-based)
+    - include_images: Whether to include base64-encoded images (default: True)
+    """
+    try:
+        # Construct the JSON file path
+        json_file_path = os.path.join(settings.JSON_DIR, f"{document_id}_processed.json")
+        
+        # Check if file exists
+        if not os.path.exists(json_file_path):
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Processed chunks not found for document '{document_id}'"
+            )
+        
+        # Read the JSON file
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            chunks_data = json.load(f)
+        
+        # Validate chunk index
+        if not isinstance(chunks_data, list):
+            raise HTTPException(
+                status_code=400,
+                detail="Chunks data is not in expected list format"
+            )
+        
+        if chunk_index < 0 or chunk_index >= len(chunks_data):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Chunk index {chunk_index} out of range. Valid range: 0-{len(chunks_data)-1}"
+            )
+        
+        chunk = chunks_data[chunk_index]
+        
+        # Process images if requested
+        if include_images and 'image_paths' in chunk and chunk['image_paths']:
+            chunk['images_base64'] = []
+            
+            for image_path in chunk['image_paths']:
+                # Construct full image path
+                full_image_path = os.path.join(settings.IMAGE_DIR, Path(image_path).name)
+                
+                try:
+                    if os.path.exists(full_image_path):
+                        with open(full_image_path, 'rb') as img_file:
+                            image_data = img_file.read()
+                            base64_image = base64.b64encode(image_data).decode('utf-8')
+                            
+                            # Get image extension for proper MIME type
+                            ext = Path(full_image_path).suffix.lower()
+                            mime_type = 'image/png' if ext == '.png' else 'image/jpeg'
+                            
+                            chunk['images_base64'].append({
+                                'filename': Path(image_path).name,
+                                'data': f"data:{mime_type};base64,{base64_image}",
+                                'path': image_path
+                            })
+                    else:
+                        chunk['images_base64'].append({
+                            'filename': Path(image_path).name,
+                            'error': 'Image file not found',
+                            'path': image_path
+                        })
+                except Exception as img_error:
+                    chunk['images_base64'].append({
+                        'filename': Path(image_path).name,
+                        'error': str(img_error),
+                        'path': image_path
+                    })
+        
+        return {
+            "success": True,
+            "document_id": document_id,
+            "chunk_index": chunk_index,
+            "total_chunks": len(chunks_data),
+            "images_included": include_images,
+            "chunk": chunk
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error reading chunk: {str(e)}"
+        )
+
+
+@router.get("/images/{image_filename}")
+async def get_image(image_filename: str):
+    """
+    Get a specific image file directly
+    
+    Parameters:
+    - image_filename: Name of the image file (e.g., 'image_0001.png')
+    """
+    try:
+        image_path = os.path.join(settings.IMAGE_DIR, image_filename)
+        
+        if not os.path.exists(image_path):
+            raise HTTPException(
+                status_code=404,
+                detail=f"Image '{image_filename}' not found"
+            )
+        
+        # Validate it's actually an image file
+        allowed_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp']
+        if Path(image_path).suffix.lower() not in allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file type"
+            )
+        
+        return FileResponse(
+            path=image_path,
+            media_type="image/png" if image_path.endswith('.png') else "image/jpeg",
+            filename=image_filename
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving image: {str(e)}"
+        )
