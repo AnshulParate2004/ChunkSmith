@@ -16,7 +16,11 @@ from core.document_parser import DocumentParser
 from core.content_processor import ContentProcessor
 from core.vector_store import VectorStoreManager
 from utils.file_helpers import FileHandler
+from core.chat_agent import ChatAgent
+from typing import Dict
 
+# Store active chat agents
+chat_agents: Dict[str, ChatAgent] = {}
 router = APIRouter()
 
 # Store processing status for each document
@@ -61,6 +65,167 @@ async def send_sse_message(message_type: str, data: dict) -> str:
     }
     return f"data: {json.dumps(message)}\n\n"
 
+
+@router.post("/chat/init/{document_id}")
+async def initialize_chat(document_id: str):
+    """
+    Initialize chat session for a document
+    
+    Args:
+        document_id: ID of the document to chat about
+    """
+    try:
+        # Check if document exists
+        vector_store_path = os.path.join(settings.CHROMA_DIR, document_id)
+        if not os.path.exists(vector_store_path):
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Document '{document_id}' not found. Please process the PDF first."
+            )
+        
+        # Create chat agent
+        chat_agent = ChatAgent(document_id=document_id)
+        session_id = f"{document_id}_{len(chat_agents)}"
+        chat_agents[session_id] = chat_agent
+        
+        return {
+            "success": True,
+            "session_id": session_id,
+            "document_id": document_id,
+            "message": "Chat session initialized successfully"
+        }
+    
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chat/stream/{session_id}")
+async def chat_stream(session_id: str, message: str):
+    """
+    Stream chat responses via SSE
+    
+    Args:
+        session_id: Chat session ID from initialization
+        message: User's message/question
+    
+    Usage:
+        1. First call /chat/init/{document_id} to get session_id
+        2. Then connect to this endpoint: /chat/stream/{session_id}?message=your_question
+    """
+    
+    if session_id not in chat_agents:
+        raise HTTPException(
+            status_code=404,
+            detail="Chat session not found. Please initialize chat first using /chat/init/{document_id}"
+        )
+    
+    async def event_generator() -> AsyncGenerator[str, None]:
+        """Generate SSE events for chat responses"""
+        try:
+            chat_agent = chat_agents[session_id]
+            
+            # Send connection confirmation
+            yield f"data: {json.dumps({'type': 'connected', 'message': 'Connected to chat stream'})}\n\n"
+            
+            # Stream chat responses
+            async for event in chat_agent.chat_stream(message):
+                event_type = event["type"]
+                event_data = event["data"]
+                
+                # Format as SSE
+                sse_message = {
+                    "type": event_type,
+                    **event_data
+                }
+                
+                yield f"data: {json.dumps(sse_message)}\n\n"
+            
+            # Send end signal
+            yield f"data: {json.dumps({'type': 'end'})}\n\n"
+            
+        except asyncio.CancelledError:
+            # Client disconnected
+            pass
+        except Exception as e:
+            error_message = str(e).replace('"', '\\"').replace("\n", " ")
+            yield f"data: {json.dumps({'type': 'error', 'message': error_message})}\n\n"
+            yield f"data: {json.dumps({'type': 'end'})}\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Access-Control-Allow-Origin": "*"
+        }
+    )
+
+
+@router.post("/chat/clear/{session_id}")
+async def clear_chat_history(session_id: str):
+    """
+    Clear conversation history for a chat session
+    
+    Args:
+        session_id: Chat session ID
+    """
+    if session_id not in chat_agents:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    
+    try:
+        chat_agents[session_id].clear_history()
+        return {
+            "success": True,
+            "message": "Chat history cleared successfully"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/chat/session/{session_id}")
+async def delete_chat_session(session_id: str):
+    """
+    Delete a chat session
+    
+    Args:
+        session_id: Chat session ID
+    """
+    if session_id not in chat_agents:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    
+    try:
+        del chat_agents[session_id]
+        return {
+            "success": True,
+            "message": "Chat session deleted successfully"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chat/sessions")
+async def list_chat_sessions():
+    """
+    List all active chat sessions
+    """
+    sessions = [
+        {
+            "session_id": session_id,
+            "document_id": agent.document_id,
+            "history_length": len(agent.conversation_history)
+        }
+        for session_id, agent in chat_agents.items()
+    ]
+    
+    return {
+        "success": True,
+        "count": len(sessions),
+        "sessions": sessions
+    }
 
 @router.get("/languages")
 async def get_supported_languages():
