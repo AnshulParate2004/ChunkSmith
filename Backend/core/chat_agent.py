@@ -72,7 +72,7 @@ CONVERSATION HISTORY:
 
 Answer the user's question based on the context and conversation history."""
     
-    def search_relevant_context(self, query: str, k: int = 5) -> List[Dict]:
+    def search_relevant_context(self, query: str, k: int = 2) -> List[Dict]:
         """
         Search for relevant context in vector store
         

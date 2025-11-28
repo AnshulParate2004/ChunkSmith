@@ -1,6 +1,7 @@
-"""Content processing module for AI-enhanced summarization"""
+"""Content processing module with multi-API key async processing"""
 import os
 import base64
+import asyncio
 from pathlib import Path
 from typing import List, Dict
 from langchain_core.documents import Document
@@ -21,28 +22,65 @@ class AIParser(BaseModel):
 
 
 class ContentProcessor:
-    """Processes document chunks with AI-enhanced summaries"""
+    """Processes document chunks with AI-enhanced summaries using multiple API keys"""
     
-    def __init__(self, image_dir: str, model_name: str = "gemini-2.5-pro", temperature: float = 0):
+    def __init__(self, image_dir: str, model_name: str = "gemini-2.0-flash-exp", temperature: float = 0):
         self.image_dir = image_dir
         self.model_name = model_name
         self.temperature = temperature
         
-        # Initialize LLM with single API key from environment
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY not found in environment")
+        # Load all available API keys from environment
+        self.api_keys = self._load_api_keys()
         
-        self.api_key = api_key
-        self.llm = ChatGoogleGenerativeAI(
-            model=self.model_name, 
+        if not self.api_keys:
+            raise ValueError("No GOOGLE_API_KEY found in environment")
+        
+        print(f"✅ Initialized ContentProcessor with {len(self.api_keys)} API keys")
+        print(f"✅ Model: {model_name}")
+        
+        Path(image_dir).mkdir(parents=True, exist_ok=True)
+    
+    def _load_api_keys(self) -> List[str]:
+        """
+        Load all available Google API keys from environment
+        Looks for GOOGLE_API_KEY_1 through GOOGLE_API_KEY_10
+        Falls back to GOOGLE_API_KEY if numbered keys not found
+        
+        Returns:
+            List of API keys
+        """
+        api_keys = []
+        
+        # Try to load numbered API keys (1-10)
+        for i in range(1, 11):
+            key = os.getenv(f"GOOGLE_API_KEY_{i}")
+            if key and key.strip():
+                api_keys.append(key.strip())
+        
+        # Fallback to single GOOGLE_API_KEY if no numbered keys found
+        if not api_keys:
+            single_key = os.getenv("GOOGLE_API_KEY")
+            if single_key and single_key.strip():
+                api_keys.append(single_key.strip())
+        
+        return api_keys
+    
+    def _get_llm_for_key(self, api_key: str):
+        """
+        Create LLM instance for specific API key
+        
+        Args:
+            api_key: Google API key
+            
+        Returns:
+            LLM instance with structured output
+        """
+        llm = ChatGoogleGenerativeAI(
+            model=self.model_name,
             temperature=self.temperature,
             google_api_key=api_key
         )
-        self.llm_structured = self.llm.with_structured_output(AIParser)
-        
-        Path(image_dir).mkdir(parents=True, exist_ok=True)
-        print(f"✅ Initialized ContentProcessor with model: {model_name}")
+        return llm.with_structured_output(AIParser)
     
     @staticmethod
     def clean_directory(base_dir: Path) -> None:
@@ -167,19 +205,23 @@ class ContentProcessor:
 
         return content_data
     
-    def create_ai_enhanced_summary(
+    async def create_ai_enhanced_summary_async(
         self, 
         text: str, 
         tables: List[str], 
-        images: List[str]
+        images: List[str],
+        api_key: str,
+        chunk_index: int
     ) -> AIParser:
         """
-        Create AI-enhanced summary (simplified - no retry logic)
+        Create AI-enhanced summary asynchronously with specific API key
         
         Args:
             text: Text content to summarize
             tables: List of HTML tables
             images: List of base64 encoded images
+            api_key: Google API key to use
+            chunk_index: Index of chunk for logging
         
         Returns:
             AIParser object with structured summary
@@ -231,14 +273,20 @@ IMPORTANT: Return structured output with these fields:
             
             message = HumanMessage(content=message_content)
             
-            # Make API call (single attempt, no retry)
-            response = self.llm_structured.invoke([message])
+            # Get LLM for this specific API key
+            llm_structured = self._get_llm_for_key(api_key)
+            
+            # Make async API call
+            print(f"     🔄 Chunk {chunk_index}: Sending to API (key #{self.api_keys.index(api_key) + 1})")
+            response = await llm_structured.ainvoke([message])
+            print(f"     ✅ Chunk {chunk_index}: Response received")
+            
             return response
                 
         except Exception as e:
             # Return fallback on any error
-            print(f"     ❌ Error creating AI summary: {str(e)[:150]}")
-            print(f"     ⚠️  Using fallback summary")
+            print(f"     ❌ Chunk {chunk_index}: Error - {str(e)[:100]}")
+            print(f"     ⚠️  Chunk {chunk_index}: Using fallback summary")
             
             fallback_summary = f"{text[:300]}..."
             if tables:
@@ -253,9 +301,43 @@ IMPORTANT: Return structured output with these fields:
                 table_interpretation="***DO NOT USE THIS TABLE***" if tables else "No tables present"
             )
     
+    async def process_chunks_async(self, chunks_data: List[Dict]) -> List[AIParser]:
+        """
+        Process multiple chunks asynchronously using different API keys
+        
+        Args:
+            chunks_data: List of dictionaries containing chunk data
+            
+        Returns:
+            List of AIParser responses
+        """
+        tasks = []
+        
+        # Create async tasks for each chunk with corresponding API key
+        for i, chunk_data in enumerate(chunks_data):
+            # Use modulo to cycle through API keys if we have more chunks than keys
+            api_key_index = i % len(self.api_keys)
+            api_key = self.api_keys[api_key_index]
+            
+            task = self.create_ai_enhanced_summary_async(
+                text=chunk_data['text'],
+                tables=chunk_data['tables'],
+                images=chunk_data['image_base64'],
+                api_key=api_key,
+                chunk_index=i + 1
+            )
+            tasks.append(task)
+        
+        # Run all tasks concurrently
+        print(f"\n🚀 Processing {len(tasks)} chunks asynchronously with {min(len(tasks), len(self.api_keys))} API keys...")
+        responses = await asyncio.gather(*tasks)
+        print(f"✅ All {len(responses)} chunks processed!\n")
+        
+        return responses
+    
     def summarise_chunks(self, chunks) -> List[Document]:
         """
-        Process all chunks with AI Summaries.
+        Process all chunks with AI Summaries using multiple API keys asynchronously.
         
         Args:
             chunks: List of document chunks to process
@@ -263,38 +345,51 @@ IMPORTANT: Return structured output with these fields:
         Returns:
             List of LangChain Documents with enhanced summaries
         """
-        print("🧠 Processing chunks with AI Summaries...")
+        print("🧠 Processing chunks with AI Summaries (Multi-API Async Mode)...")
         
         # Clean entire workspace before processing
         from config.settings import settings
         self.clean_directory(settings.DATA_DIR)
         
-        langchain_documents = []
         total_chunks = len(chunks)
         image_counter = {'count': 1}
         
+        # Step 1: Extract content from all chunks (synchronous)
+        print(f"\n📦 Extracting content from {total_chunks} chunks...")
+        chunks_data = []
+        
         for i, chunk in enumerate(chunks, 1):
-            print(f"\n   📄 Processing chunk {i}/{total_chunks}")
+            print(f"   📄 Extracting chunk {i}/{total_chunks}")
             
             # Analyze chunk content
             content_data = self.separate_content_types(chunk, image_counter)
             
             # Debug info
-            print(f"     Types found: {', '.join(content_data['types'])}")
-            print(f"     Tables: {len(content_data['tables'])}, Images: {len(content_data['image_base64'])}")
+            print(f"     Types: {', '.join(content_data['types'])}, "
+                  f"Tables: {len(content_data['tables'])}, "
+                  f"Images: {len(content_data['image_base64'])}")
             if content_data['page_no']:
                 print(f"     Pages: {content_data['page_no']}")
             
-            # Create AI-enhanced summary (no retry logic)
-            print(f"      Creating AI summary...")
-            ai_response = self.create_ai_enhanced_summary(
-                content_data['text'],
-                content_data['tables'], 
-                content_data['image_base64']
-            )
-            print(f"      ✅ AI summary created")
-            
-            # Create combined searchable content from structured output
+            chunks_data.append(content_data)
+        
+        print(f"\n✅ Content extraction complete!")
+        print(f"📊 Total images saved: {image_counter['count'] - 1}")
+        
+        # Step 2: Process all chunks asynchronously with different API keys
+        print(f"\n🔮 Starting async AI processing...")
+        print(f"   Using {len(self.api_keys)} API key(s)")
+        print(f"   Processing {total_chunks} chunk(s)")
+        
+        # Run async processing
+        ai_responses = asyncio.run(self.process_chunks_async(chunks_data))
+        
+        # Step 3: Create LangChain documents
+        print(f"\n📚 Creating LangChain documents...")
+        langchain_documents = []
+        
+        for i, (content_data, ai_response) in enumerate(zip(chunks_data, ai_responses), 1):
+            # Create combined searchable content
             combined_content = f"""QUESTIONS: {ai_response.question}
 
 SUMMARY: {ai_response.summary}
@@ -303,7 +398,7 @@ IMAGE ANALYSIS: {ai_response.image_interpretation}
 
 TABLE ANALYSIS: {ai_response.table_interpretation}"""
             
-            print(f"     Preview: {ai_response.summary[:150]}...")
+            print(f"   📄 Document {i}: {ai_response.summary[:100]}...")
             
             # Create LangChain Document with metadata
             doc = Document(
@@ -325,6 +420,6 @@ TABLE ANALYSIS: {ai_response.table_interpretation}"""
             langchain_documents.append(doc)
         
         print(f"\n✅ Successfully processed {len(langchain_documents)} chunks")
-        print(f"📊 Total images saved: {image_counter['count'] - 1}")
+        print(f"⚡ Used async processing with {len(self.api_keys)} API key(s)")
         
         return langchain_documents
