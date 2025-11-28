@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
-    
+        extra = "allow"
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Create directories on initialization

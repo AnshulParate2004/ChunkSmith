@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: multimodal-rag-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - .:/app  # mount local code for hot-reload
+    command: >
+      uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  chroma-db:
+    image: ghcr.io/chroma-core/chroma:latest
+    container_name: chroma-db
+    ports:
+      - "8001:8000"
+    restart: unless-stopped

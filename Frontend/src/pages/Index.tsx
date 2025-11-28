@@ -6,10 +6,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label";
 import { Plus, Folder, Clock, FileText, Sparkles } from "lucide-react";
 import { Link } from "react-router-dom";
+import { HelpButton } from "@/components/Help/HelpButton";
+import { HelpOverlay } from "@/components/Help/HelpOverlay";
 
 const Index = () => {
   const [isNewProjectOpen, setIsNewProjectOpen] = useState(false);
   const [projectName, setProjectName] = useState("");
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   
   // Load projects from localStorage or use default projects
   const [projects, setProjects] = useState(() => {
@@ -132,6 +135,9 @@ const Index = () => {
           </div>
         </div>
       </div>
+
+      <HelpButton onClick={() => setIsHelpOpen(true)} />
+      {isHelpOpen && <HelpOverlay onClose={() => setIsHelpOpen(false)} />}
     </div>
   );
 };

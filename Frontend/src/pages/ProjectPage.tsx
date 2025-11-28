@@ -293,7 +293,9 @@ const ProjectPage = () => {
                   </div>
                 </div>
                 <div className="flex-1 min-h-0">
-                  <ChatInterface documentId={activeChatDoc} />
+                  <div className="glass-card p-6 h-full">
+                    <ChatInterface documentId={activeChatDoc} />
+                  </div>
                 </div>
               </div>
             ) : (

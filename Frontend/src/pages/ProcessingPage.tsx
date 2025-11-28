@@ -161,103 +161,104 @@ const ProcessingPage = () => {
   };
 
   return (
-    <div className="container mx-auto px-6 py-8 max-w-5xl">
-      <div className="space-y-8 animate-fade-in">
-        <Button variant="ghost" onClick={handleBack} className="mb-4">
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to Project
-        </Button>
-        
-        <div className="glass-card p-8">
-          <div className="flex items-center justify-between mb-8">
-            <div>
-              <h2 className="text-3xl font-bold text-foreground">
-                {isComplete ? 'Document Processed' : 'Processing Document'}
-              </h2>
-              <p className="text-sm text-muted-foreground mt-2">Document ID: {documentId}</p>
-            </div>
-            {!hasSavedData && <ConnectionStatus connected={connected} error={error} />}
-          </div>
-
-          <div className="space-y-6">
-            <StepIndicator currentStep={currentStep} />
-            <ProgressBar progress={progress} />
-            <StatusMessage message={statusMessage} type={statusType} />
-
-            <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
-              <span className="text-sm font-medium">Processing Time:</span>
-              <span className="text-lg font-bold">{formatTime(processingTime)}</span>
-            </div>
-          </div>
-        </div>
-
-        {isComplete && result && (
-          <div className="glass-card p-6 space-y-4">
-            <h3 className="text-xl font-bold">Processing Complete</h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="p-4 bg-primary/10 rounded-lg">
-                <p className="text-sm text-muted-foreground">Chunks Processed</p>
-                <p className="text-2xl font-bold text-primary">
-                  {result.chunks_processed || 0}
-                </p>
+    <>
+      {showViewModal && (
+        <ViewDocumentsModal
+          fileName={`Document-${documentId}.pdf`}
+          documentId={documentId || ''}
+          onClose={() => setShowViewModal(false)}
+        />
+      )}
+      
+      <div className="container mx-auto px-6 py-8 max-w-5xl">
+        <div className="space-y-8 animate-fade-in">
+          <Button variant="ghost" onClick={handleBack} className="mb-4">
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Project
+          </Button>
+          
+          <div className="glass-card p-8">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-3xl font-bold text-foreground">
+                  {isComplete ? 'Document Processed' : 'Processing Document'}
+                </h2>
+                <p className="text-sm text-muted-foreground mt-2">Document ID: {documentId}</p>
               </div>
-              <div className="p-4 bg-yellow-500/10 rounded-lg">
-                <p className="text-sm text-muted-foreground">Images Processed</p>
-                <p className="text-2xl font-bold text-yellow-500">
-                  {result.images_processed || 0}
-                </p>
-              </div>
-              <div className="p-4 bg-success/10 rounded-lg">
-                <p className="text-sm text-muted-foreground">Processing Time</p>
-                <p className="text-2xl font-bold text-success">
-                  {formatTime(processingTime)}
-                </p>
+              {!hasSavedData && <ConnectionStatus connected={connected} error={error} />}
+            </div>
+
+            <div className="space-y-6">
+              <StepIndicator currentStep={currentStep} />
+              <ProgressBar progress={progress} />
+              <StatusMessage message={statusMessage} type={statusType} />
+
+              <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
+                <span className="text-sm font-medium">Processing Time:</span>
+                <span className="text-lg font-bold">{formatTime(processingTime)}</span>
               </div>
             </div>
-
-            <div className="flex gap-4">
-
-              <Button onClick={handleDownload} variant="outline" className="flex-1">
-                <Download className="w-4 h-4 mr-2" />
-                Download Data
-              </Button>
-              <Button onClick={() => setShowViewModal(true)} variant="outline" className="flex-1">
-                <Eye className="w-4 h-4 mr-2" />
-                View Documents
-              </Button>
-            </div>
-
-            {showViewModal && (
-              <ViewDocumentsModal
-                fileName={`Document-${documentId}.pdf`}
-                documentId={documentId || ''}
-                onClose={() => setShowViewModal(false)}
-              />
-            )}
           </div>
-        )}
 
-        {messages.length > 0 && (
-          <div className="glass-card p-6">
-            <h3 className="text-lg font-semibold mb-4">Processing Logs</h3>
-            <div className="space-y-2 max-h-96 overflow-y-auto">
-              {messages.map((msg, index) => (
-                <div
-                  key={index}
-                  className="p-3 bg-muted/50 rounded text-sm font-mono"
-                >
-                  <span className="text-muted-foreground">
-                    [{new Date().toLocaleTimeString()}]
-                  </span>{' '}
-                  {msg.data.message || JSON.stringify(msg.data)}
+          {isComplete && result && (
+            <div className="glass-card p-6 space-y-4">
+              <h3 className="text-xl font-bold">Processing Complete</h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-4 bg-primary/10 rounded-lg">
+                  <p className="text-sm text-muted-foreground">Chunks Processed</p>
+                  <p className="text-2xl font-bold text-primary">
+                    {result.chunks_processed || 0}
+                  </p>
                 </div>
-              ))}
+                <div className="p-4 bg-yellow-500/10 rounded-lg">
+                  <p className="text-sm text-muted-foreground">Images Processed</p>
+                  <p className="text-2xl font-bold text-yellow-500">
+                    {result.images_extracted || 0}
+                  </p>
+                </div>
+                <div className="p-4 bg-success/10 rounded-lg">
+                  <p className="text-sm text-muted-foreground">Processing Time</p>
+                  <p className="text-2xl font-bold text-success">
+                    {formatTime(processingTime)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <Button onClick={handleDownload} variant="outline" className="flex-1">
+                  <Download className="w-4 h-4 mr-2" />
+                  Download Data
+                </Button>
+                <Button onClick={() => setShowViewModal(true)} variant="outline" className="flex-1">
+                  <Eye className="w-4 h-4 mr-2" />
+                  View Documents
+                </Button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+
+          {messages.length > 0 && (
+            <div className="glass-card p-6">
+              <h3 className="text-lg font-semibold mb-4">Processing Logs</h3>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {messages.map((msg, index) => (
+                  <div
+                    key={index}
+                    className="p-3 bg-muted/50 rounded text-sm font-mono"
+                  >
+                    <span className="text-muted-foreground">
+                      [{new Date().toLocaleTimeString()}]
+                    </span>{' '}
+                    {msg.data.message || JSON.stringify(msg.data)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 };
 
