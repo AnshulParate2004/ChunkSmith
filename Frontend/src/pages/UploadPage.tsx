@@ -12,7 +12,7 @@ const UploadPage = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [settings, setSettings] = useState<ProcessSettings>({
-    languages: 'english',
+    languages: 'eng',
     extractImages: true,
     extractTables: true,
     maxCharacters: 3000,

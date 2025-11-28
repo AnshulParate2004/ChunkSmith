@@ -65,6 +65,316 @@ async def send_sse_message(message_type: str, data: dict) -> str:
     }
     return f"data: {json.dumps(message)}\n\n"
 
+@router.post("/process-pdf")
+async def initiate_pdf_processing(
+    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None,
+    max_characters: int = settings.MAX_CHARACTERS,
+    new_after_n_chars: int = settings.NEW_AFTER_N_CHARS,
+    combine_text_under_n_chars: int = settings.COMBINE_TEXT_UNDER_N_CHARS,
+    extract_images: bool = settings.EXTRACT_IMAGES,
+    extract_tables: bool = settings.EXTRACT_TABLES,
+    languages: str = "english",
+):
+    """
+    Initiate PDF processing and return document_id for SSE streaming
+    
+    After calling this endpoint, connect to /api/process-pdf-stream/{document_id}
+    to receive real-time progress updates via Server-Sent Events
+    """
+    try:
+        # Generate unique document ID
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        document_id = f"{file.filename.replace('.pdf', '')}_{timestamp}"
+        
+        # Save uploaded file
+        upload_path = os.path.join(settings.UPLOAD_DIR, f"{document_id}.pdf")
+        with open(upload_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+        
+        # Validate PDF
+        is_valid, error_msg = FileHandler.validate_pdf(
+            upload_path, 
+            settings.MAX_FILE_SIZE // (1024 * 1024)
+        )
+        if not is_valid:
+            os.remove(upload_path)
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # Initialize status
+        processing_status[document_id] = {
+            "status": "queued",
+            "progress": 0,
+            "message": "Processing queued"
+        }
+        
+        # Start background processing
+        background_tasks.add_task(
+            process_pdf_background,
+            document_id,
+            upload_path,
+            max_characters,
+            new_after_n_chars,
+            combine_text_under_n_chars,
+            extract_images,
+            extract_tables,
+            languages
+        )
+        
+        return {
+            "success": True,
+            "message": "Processing initiated",
+            "document_id": document_id,
+            "stream_url": f"/api/process-pdf-stream/{document_id}"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/process-pdf-stream/{document_id}")
+async def stream_pdf_processing(document_id: str): 
+    """
+    Stream processing updates via Server-Sent Events (SSE)
+    
+    Connect to this endpoint after initiating processing to receive real-time updates
+    """
+    
+    async def event_generator() -> AsyncGenerator[str, None]:
+        """Generate SSE events for processing updates"""
+        
+        try:
+            # Wait for processing to start
+            max_wait = 30  # 30 seconds timeout
+            waited = 0
+            while document_id not in processing_status and waited < max_wait:
+                await asyncio.sleep(0.5)
+                waited += 0.5
+            
+            if document_id not in processing_status:
+                yield await send_sse_message("error", {
+                    "message": "Processing not found or timed out"
+                })
+                return
+            
+            # Send initial connection message
+            yield await send_sse_message("connected", {
+                "message": "Connected to processing stream",
+                "document_id": document_id
+            })
+            
+            last_status = None
+            
+            # Stream updates
+            while True:
+                if document_id in processing_status:
+                    current_status = processing_status[document_id]
+                    
+                    # Only send if status changed
+                    if current_status != last_status:
+                        yield await send_sse_message("progress", current_status)
+                        last_status = current_status.copy()
+                    
+                    # Check if completed or failed
+                    if current_status.get("status") in ["completed", "failed"]:
+                        # Send final message
+                        if current_status.get("status") == "completed":
+                            yield await send_sse_message("complete", current_status)
+                        else:
+                            yield await send_sse_message("error", current_status)
+                        
+                        # Cleanup after 5 seconds
+                        await asyncio.sleep(5)
+                        if document_id in processing_status:
+                            del processing_status[document_id]
+                        break
+                
+                await asyncio.sleep(1)  # Poll every second
+        
+        except asyncio.CancelledError:
+            # Client disconnected
+            pass
+        except Exception as e:
+            yield await send_sse_message("error", {
+                "message": f"Stream error: {str(e)}"
+            })
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
+        }
+    )
+
+
+async def process_pdf_background(
+    document_id: str,
+    upload_path: str,
+    max_characters: int,
+    new_after_n_chars: int,
+    combine_text_under_n_chars: int,
+    extract_images: bool,
+    extract_tables: bool,
+    languages: str
+):
+    """Background task for PDF processing with status updates"""
+    
+    try:
+        # Update status: Starting
+        processing_status[document_id] = {
+            "status": "processing",
+            "step": 1,
+            "step_name": "upload",
+            "progress": 5,
+            "message": "📤 File uploaded and validated"
+        }
+        await asyncio.sleep(0.5)  # Brief pause for UI
+        
+        # Step 2: Parse PDF
+        processing_status[document_id] = {
+            "status": "processing",
+            "step": 2,
+            "step_name": "parsing",
+            "progress": 10,
+            "message": "🔍 Step 2: Parsing PDF document..."
+        }
+        
+        # ✅ Convert comma-separated languages to list
+        # The DocumentParser.get_language_codes() will handle the conversion
+        language_list = [lang.strip() for lang in languages.split(',')]
+        
+        # Debug logging
+        print(f"📝 Input languages from frontend: {language_list}")
+        
+        parser = DocumentParser(image_output_dir=str(settings.IMAGE_DIR))
+        
+        # Simulate async behavior for parsing (runs in thread pool)
+        loop = asyncio.get_event_loop()
+        elements = await loop.run_in_executor(
+            None,
+            parser.partition_pdf_document,
+            upload_path,
+            max_characters,
+            new_after_n_chars,
+            combine_text_under_n_chars,
+            extract_images,
+            extract_tables,
+            language_list  # Pass language names directly - parser will convert them
+        )
+        
+        checkpoint1_path = os.path.join(settings.PICKLE_DIR, f"{document_id}_checkpoint1.pkl")
+        FileHandler.save_pickle(elements, checkpoint1_path)
+        
+        processing_status[document_id] = {
+            "status": "processing",
+            "step": 2,
+            "step_name": "parsing",
+            "progress": 30,
+            "message": f"✅ Extracted {len(elements)} elements",
+            "elements_count": len(elements)
+        }
+        await asyncio.sleep(0.5)
+        
+        # Step 3: AI Processing
+        processing_status[document_id] = {
+            "status": "processing",
+            "step": 3,
+            "step_name": "ai_processing",
+            "progress": 35,
+            "message": "🤖 Step 3: Processing chunks with AI (this may take a while)...",
+            "total_chunks": len(elements)
+        }
+        
+        processor = ContentProcessor(
+            image_dir=str(settings.IMAGE_DIR),
+            model_name=settings.GEMINI_MODEL,
+            temperature=settings.TEMPERATURE
+        )
+        
+        # Process chunks (runs in thread pool)
+        documents = await loop.run_in_executor(
+            None,
+            processor.summarise_chunks,
+            elements
+        )
+        
+        image_count = len(list(settings.IMAGE_DIR.glob("*.png")))
+        
+        output_pickle_path = os.path.join(settings.PICKLE_DIR, f"{document_id}_processed.pkl")
+        output_json_path = os.path.join(settings.JSON_DIR, f"{document_id}_processed.json")
+        
+        FileHandler.save_pickle(documents, output_pickle_path)
+        FileHandler.save_json(documents, output_json_path)
+        
+        processing_status[document_id] = {
+            "status": "processing",
+            "step": 3,
+            "step_name": "ai_processing",
+            "progress": 70,
+            "message": f"✅ Processed {len(documents)} chunks",
+            "chunks_processed": len(documents),
+            "images_extracted": image_count
+        }
+        await asyncio.sleep(0.5)
+        
+        # Step 4: Vector Store
+        processing_status[document_id] = {
+            "status": "processing",
+            "step": 4,
+            "step_name": "vectorization",
+            "progress": 75,
+            "message": "🔮 Step 4: Creating vector embeddings..."
+        }
+        
+        vector_store_path = os.path.join(settings.CHROMA_DIR, document_id)
+        vector_manager = VectorStoreManager(embedding_model=settings.EMBEDDING_MODEL)
+        
+        # Create vector store (runs in thread pool)
+        vectorstore = await loop.run_in_executor(
+            None,
+            vector_manager.create_vector_store,
+            documents,
+            vector_store_path,
+            document_id
+        )
+        
+        processing_status[document_id] = {
+            "status": "processing",
+            "step": 4,
+            "step_name": "vectorization",
+            "progress": 95,
+            "message": "✅ Vector store created"
+        }
+        await asyncio.sleep(0.5)
+        
+        # Complete
+        processing_status[document_id] = {
+            "status": "completed",
+            "progress": 100,
+            "message": "✅ Processing complete!",
+            "result": {
+                "document_id": document_id,
+                "chunks_processed": len(documents),
+                "images_extracted": image_count,
+                "pickle_path": output_pickle_path,
+                "json_path": output_json_path,
+                "vector_store_path": vector_store_path
+            }
+        }
+    
+    except Exception as e:
+        processing_status[document_id] = {
+            "status": "failed",
+            "progress": 0,
+            "message": f"❌ Error: {str(e)}"
+        }
+        print(f"Error processing PDF: {e}")
 
 @router.post("/chat/init/{document_id}")
 async def initialize_chat(document_id: str):
@@ -248,310 +558,310 @@ async def get_supported_languages():
     }
 
 
-@router.post("/process-pdf")
-async def initiate_pdf_processing(
-    file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = None,
-    max_characters: int = settings.MAX_CHARACTERS,
-    new_after_n_chars: int = settings.NEW_AFTER_N_CHARS,
-    combine_text_under_n_chars: int = settings.COMBINE_TEXT_UNDER_N_CHARS,
-    extract_images: bool = settings.EXTRACT_IMAGES,
-    extract_tables: bool = settings.EXTRACT_TABLES,
-    languages: str = "english",
-):
-    """
-    Initiate PDF processing and return document_id for SSE streaming
+# @router.post("/process-pdf")
+# async def initiate_pdf_processing(
+#     file: UploadFile = File(...),
+#     background_tasks: BackgroundTasks = None,
+#     max_characters: int = settings.MAX_CHARACTERS,
+#     new_after_n_chars: int = settings.NEW_AFTER_N_CHARS,
+#     combine_text_under_n_chars: int = settings.COMBINE_TEXT_UNDER_N_CHARS,
+#     extract_images: bool = settings.EXTRACT_IMAGES,
+#     extract_tables: bool = settings.EXTRACT_TABLES,
+#     languages: str = "english",
+# ):
+#     """
+#     Initiate PDF processing and return document_id for SSE streaming
     
-    After calling this endpoint, connect to /api/process-pdf-stream/{document_id}
-    to receive real-time progress updates via Server-Sent Events
-    """
-    try:
-        # Generate unique document ID
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        document_id = f"{file.filename.replace('.pdf', '')}_{timestamp}"
+#     After calling this endpoint, connect to /api/process-pdf-stream/{document_id}
+#     to receive real-time progress updates via Server-Sent Events
+#     """
+#     try:
+#         # Generate unique document ID
+#         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+#         document_id = f"{file.filename.replace('.pdf', '')}_{timestamp}"
         
-        # Save uploaded file
-        upload_path = os.path.join(settings.UPLOAD_DIR, f"{document_id}.pdf")
-        with open(upload_path, "wb") as buffer:
-            content = await file.read()
-            buffer.write(content)
+#         # Save uploaded file
+#         upload_path = os.path.join(settings.UPLOAD_DIR, f"{document_id}.pdf")
+#         with open(upload_path, "wb") as buffer:
+#             content = await file.read()
+#             buffer.write(content)
         
-        # Validate PDF
-        is_valid, error_msg = FileHandler.validate_pdf(
-            upload_path, 
-            settings.MAX_FILE_SIZE // (1024 * 1024)
-        )
-        if not is_valid:
-            os.remove(upload_path)
-            raise HTTPException(status_code=400, detail=error_msg)
+#         # Validate PDF
+#         is_valid, error_msg = FileHandler.validate_pdf(
+#             upload_path, 
+#             settings.MAX_FILE_SIZE // (1024 * 1024)
+#         )
+#         if not is_valid:
+#             os.remove(upload_path)
+#             raise HTTPException(status_code=400, detail=error_msg)
         
-        # Initialize status
-        processing_status[document_id] = {
-            "status": "queued",
-            "progress": 0,
-            "message": "Processing queued"
-        }
+#         # Initialize status
+#         processing_status[document_id] = {
+#             "status": "queued",
+#             "progress": 0,
+#             "message": "Processing queued"
+#         }
         
-        # Start background processing
-        background_tasks.add_task(
-            process_pdf_background,
-            document_id,
-            upload_path,
-            max_characters,
-            new_after_n_chars,
-            combine_text_under_n_chars,
-            extract_images,
-            extract_tables,
-            languages
-        )
+#         # Start background processing
+#         background_tasks.add_task(
+#             process_pdf_background,
+#             document_id,
+#             upload_path,
+#             max_characters,
+#             new_after_n_chars,
+#             combine_text_under_n_chars,
+#             extract_images,
+#             extract_tables,
+#             languages
+#         )
         
-        return {
-            "success": True,
-            "message": "Processing initiated",
-            "document_id": document_id,
-            "stream_url": f"/api/process-pdf-stream/{document_id}"
-        }
+#         return {
+#             "success": True,
+#             "message": "Processing initiated",
+#             "document_id": document_id,
+#             "stream_url": f"/api/process-pdf-stream/{document_id}"
+#         }
     
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/process-pdf-stream/{document_id}")
-async def stream_pdf_processing(document_id: str): 
-    """
-    Stream processing updates via Server-Sent Events (SSE)
+# @router.get("/process-pdf-stream/{document_id}")
+# async def stream_pdf_processing(document_id: str): 
+#     """
+#     Stream processing updates via Server-Sent Events (SSE)
     
-    Connect to this endpoint after initiating processing to receive real-time updates
-    """
+#     Connect to this endpoint after initiating processing to receive real-time updates
+#     """
     
-    async def event_generator() -> AsyncGenerator[str, None]:
-        """Generate SSE events for processing updates"""
+#     async def event_generator() -> AsyncGenerator[str, None]:
+#         """Generate SSE events for processing updates"""
         
-        try:
-            # Wait for processing to start
-            max_wait = 30  # 30 seconds timeout
-            waited = 0
-            while document_id not in processing_status and waited < max_wait:
-                await asyncio.sleep(0.5)
-                waited += 0.5
+#         try:
+#             # Wait for processing to start
+#             max_wait = 30  # 30 seconds timeout
+#             waited = 0
+#             while document_id not in processing_status and waited < max_wait:
+#                 await asyncio.sleep(0.5)
+#                 waited += 0.5
             
-            if document_id not in processing_status:
-                yield await send_sse_message("error", {
-                    "message": "Processing not found or timed out"
-                })
-                return
+#             if document_id not in processing_status:
+#                 yield await send_sse_message("error", {
+#                     "message": "Processing not found or timed out"
+#                 })
+#                 return
             
-            # Send initial connection message
-            yield await send_sse_message("connected", {
-                "message": "Connected to processing stream",
-                "document_id": document_id
-            })
+#             # Send initial connection message
+#             yield await send_sse_message("connected", {
+#                 "message": "Connected to processing stream",
+#                 "document_id": document_id
+#             })
             
-            last_status = None
+#             last_status = None
             
-            # Stream updates
-            while True:
-                if document_id in processing_status:
-                    current_status = processing_status[document_id]
+#             # Stream updates
+#             while True:
+#                 if document_id in processing_status:
+#                     current_status = processing_status[document_id]
                     
-                    # Only send if status changed
-                    if current_status != last_status:
-                        yield await send_sse_message("progress", current_status)
-                        last_status = current_status.copy()
+#                     # Only send if status changed
+#                     if current_status != last_status:
+#                         yield await send_sse_message("progress", current_status)
+#                         last_status = current_status.copy()
                     
-                    # Check if completed or failed
-                    if current_status.get("status") in ["completed", "failed"]:
-                        # Send final message
-                        if current_status.get("status") == "completed":
-                            yield await send_sse_message("complete", current_status)
-                        else:
-                            yield await send_sse_message("error", current_status)
+#                     # Check if completed or failed
+#                     if current_status.get("status") in ["completed", "failed"]:
+#                         # Send final message
+#                         if current_status.get("status") == "completed":
+#                             yield await send_sse_message("complete", current_status)
+#                         else:
+#                             yield await send_sse_message("error", current_status)
                         
-                        # Cleanup after 5 seconds
-                        await asyncio.sleep(5)
-                        if document_id in processing_status:
-                            del processing_status[document_id]
-                        break
+#                         # Cleanup after 5 seconds
+#                         await asyncio.sleep(5)
+#                         if document_id in processing_status:
+#                             del processing_status[document_id]
+#                         break
                 
-                await asyncio.sleep(1)  # Poll every second
+#                 await asyncio.sleep(1)  # Poll every second
         
-        except asyncio.CancelledError:
-            # Client disconnected
-            pass
-        except Exception as e:
-            yield await send_sse_message("error", {
-                "message": f"Stream error: {str(e)}"
-            })
+#         except asyncio.CancelledError:
+#             # Client disconnected
+#             pass
+#         except Exception as e:
+#             yield await send_sse_message("error", {
+#                 "message": f"Stream error: {str(e)}"
+#             })
     
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # Disable nginx buffering
-        }
-    )
+#     return StreamingResponse(
+#         event_generator(),
+#         media_type="text/event-stream",
+#         headers={
+#             "Cache-Control": "no-cache",
+#             "Connection": "keep-alive",
+#             "X-Accel-Buffering": "no"  # Disable nginx buffering
+#         }
+#     )
 
 
-async def process_pdf_background(
-    document_id: str,
-    upload_path: str,
-    max_characters: int,
-    new_after_n_chars: int,
-    combine_text_under_n_chars: int,
-    extract_images: bool,
-    extract_tables: bool,
-    languages: str
-):
-    """Background task for PDF processing with status updates"""
+# async def process_pdf_background(
+#     document_id: str,
+#     upload_path: str,
+#     max_characters: int,
+#     new_after_n_chars: int,
+#     combine_text_under_n_chars: int,
+#     extract_images: bool,
+#     extract_tables: bool,
+#     languages: str
+# ):
+#     """Background task for PDF processing with status updates"""
     
-    try:
-        # Update status: Starting
-        processing_status[document_id] = {
-            "status": "processing",
-            "step": 1,
-            "step_name": "upload",
-            "progress": 5,
-            "message": "📤 File uploaded and validated"
-        }
-        await asyncio.sleep(0.5)  # Brief pause for UI
+#     try:
+#         # Update status: Starting
+#         processing_status[document_id] = {
+#             "status": "processing",
+#             "step": 1,
+#             "step_name": "upload",
+#             "progress": 5,
+#             "message": "📤 File uploaded and validated"
+#         }
+#         await asyncio.sleep(0.5)  # Brief pause for UI
         
-        # Step 2: Parse PDF
-        processing_status[document_id] = {
-            "status": "processing",
-            "step": 2,
-            "step_name": "parsing",
-            "progress": 10,
-            "message": "🔍 Step 2: Parsing PDF document..."
-        }
+#         # Step 2: Parse PDF
+#         processing_status[document_id] = {
+#             "status": "processing",
+#             "step": 2,
+#             "step_name": "parsing",
+#             "progress": 10,
+#             "message": "🔍 Step 2: Parsing PDF document..."
+#         }
         
-        language_list = [lang.strip() for lang in languages.split(',')]
-        parser = DocumentParser(image_output_dir=str(settings.IMAGE_DIR))
+#         language_list = [lang.strip() for lang in languages.split(',')]
+#         parser = DocumentParser(image_output_dir=str(settings.IMAGE_DIR))
         
-        # Simulate async behavior for parsing (runs in thread pool)
-        loop = asyncio.get_event_loop()
-        elements = await loop.run_in_executor(
-            None,
-            parser.partition_pdf_document,
-            upload_path,
-            max_characters,
-            new_after_n_chars,
-            combine_text_under_n_chars,
-            extract_images,
-            extract_tables,
-            language_list
-        )
+#         # Simulate async behavior for parsing (runs in thread pool)
+#         loop = asyncio.get_event_loop()
+#         elements = await loop.run_in_executor(
+#             None,
+#             parser.partition_pdf_document,
+#             upload_path,
+#             max_characters,
+#             new_after_n_chars,
+#             combine_text_under_n_chars,
+#             extract_images,
+#             extract_tables,
+#             language_list
+#         )
         
-        checkpoint1_path = os.path.join(settings.PICKLE_DIR, f"{document_id}_checkpoint1.pkl")
-        FileHandler.save_pickle(elements, checkpoint1_path)
+#         checkpoint1_path = os.path.join(settings.PICKLE_DIR, f"{document_id}_checkpoint1.pkl")
+#         FileHandler.save_pickle(elements, checkpoint1_path)
         
-        processing_status[document_id] = {
-            "status": "processing",
-            "step": 2,
-            "step_name": "parsing",
-            "progress": 30,
-            "message": f"✅ Extracted {len(elements)} elements",
-            "elements_count": len(elements)
-        }
-        await asyncio.sleep(0.5)
+#         processing_status[document_id] = {
+#             "status": "processing",
+#             "step": 2,
+#             "step_name": "parsing",
+#             "progress": 30,
+#             "message": f"✅ Extracted {len(elements)} elements",
+#             "elements_count": len(elements)
+#         }
+#         await asyncio.sleep(0.5)
         
-        # Step 3: AI Processing
-        processing_status[document_id] = {
-            "status": "processing",
-            "step": 3,
-            "step_name": "ai_processing",
-            "progress": 35,
-            "message": "🤖 Step 3: Processing chunks with AI (this may take a while)...",
-            "total_chunks": len(elements)
-        }
+#         # Step 3: AI Processing
+#         processing_status[document_id] = {
+#             "status": "processing",
+#             "step": 3,
+#             "step_name": "ai_processing",
+#             "progress": 35,
+#             "message": "🤖 Step 3: Processing chunks with AI (this may take a while)...",
+#             "total_chunks": len(elements)
+#         }
         
-        processor = ContentProcessor(
-            image_dir=str(settings.IMAGE_DIR),
-            model_name=settings.GEMINI_MODEL,
-            temperature=settings.TEMPERATURE
-        )
+#         processor = ContentProcessor(
+#             image_dir=str(settings.IMAGE_DIR),
+#             model_name=settings.GEMINI_MODEL,
+#             temperature=settings.TEMPERATURE
+#         )
         
-        # Process chunks (runs in thread pool)
-        documents = await loop.run_in_executor(
-            None,
-            processor.summarise_chunks,
-            elements
-        )
+#         # Process chunks (runs in thread pool)
+#         documents = await loop.run_in_executor(
+#             None,
+#             processor.summarise_chunks,
+#             elements
+#         )
         
-        image_count = len(list(settings.IMAGE_DIR.glob("*.png")))
+#         image_count = len(list(settings.IMAGE_DIR.glob("*.png")))
         
-        output_pickle_path = os.path.join(settings.PICKLE_DIR, f"{document_id}_processed.pkl")
-        output_json_path = os.path.join(settings.JSON_DIR, f"{document_id}_processed.json")
+#         output_pickle_path = os.path.join(settings.PICKLE_DIR, f"{document_id}_processed.pkl")
+#         output_json_path = os.path.join(settings.JSON_DIR, f"{document_id}_processed.json")
         
-        FileHandler.save_pickle(documents, output_pickle_path)
-        FileHandler.save_json(documents, output_json_path)
+#         FileHandler.save_pickle(documents, output_pickle_path)
+#         FileHandler.save_json(documents, output_json_path)
         
-        processing_status[document_id] = {
-            "status": "processing",
-            "step": 3,
-            "step_name": "ai_processing",
-            "progress": 70,
-            "message": f"✅ Processed {len(documents)} chunks",
-            "chunks_processed": len(documents),
-            "images_extracted": image_count
-        }
-        await asyncio.sleep(0.5)
+#         processing_status[document_id] = {
+#             "status": "processing",
+#             "step": 3,
+#             "step_name": "ai_processing",
+#             "progress": 70,
+#             "message": f"✅ Processed {len(documents)} chunks",
+#             "chunks_processed": len(documents),
+#             "images_extracted": image_count
+#         }
+#         await asyncio.sleep(0.5)
         
-        # Step 4: Vector Store
-        processing_status[document_id] = {
-            "status": "processing",
-            "step": 4,
-            "step_name": "vectorization",
-            "progress": 75,
-            "message": "🔮 Step 4: Creating vector embeddings..."
-        }
+#         # Step 4: Vector Store
+#         processing_status[document_id] = {
+#             "status": "processing",
+#             "step": 4,
+#             "step_name": "vectorization",
+#             "progress": 75,
+#             "message": "🔮 Step 4: Creating vector embeddings..."
+#         }
         
-        vector_store_path = os.path.join(settings.CHROMA_DIR, document_id)
-        vector_manager = VectorStoreManager(embedding_model=settings.EMBEDDING_MODEL)
+#         vector_store_path = os.path.join(settings.CHROMA_DIR, document_id)
+#         vector_manager = VectorStoreManager(embedding_model=settings.EMBEDDING_MODEL)
         
-        # Create vector store (runs in thread pool)
-        vectorstore = await loop.run_in_executor(
-            None,
-            vector_manager.create_vector_store,
-            documents,
-            vector_store_path,
-            document_id
-        )
+#         # Create vector store (runs in thread pool)
+#         vectorstore = await loop.run_in_executor(
+#             None,
+#             vector_manager.create_vector_store,
+#             documents,
+#             vector_store_path,
+#             document_id
+#         )
         
-        processing_status[document_id] = {
-            "status": "processing",
-            "step": 4,
-            "step_name": "vectorization",
-            "progress": 95,
-            "message": "✅ Vector store created"
-        }
-        await asyncio.sleep(0.5)
+#         processing_status[document_id] = {
+#             "status": "processing",
+#             "step": 4,
+#             "step_name": "vectorization",
+#             "progress": 95,
+#             "message": "✅ Vector store created"
+#         }
+#         await asyncio.sleep(0.5)
         
-        # Complete
-        processing_status[document_id] = {
-            "status": "completed",
-            "progress": 100,
-            "message": "✅ Processing complete!",
-            "result": {
-                "document_id": document_id,
-                "chunks_processed": len(documents),
-                "images_extracted": image_count,
-                "pickle_path": output_pickle_path,
-                "json_path": output_json_path,
-                "vector_store_path": vector_store_path
-            }
-        }
+#         # Complete
+#         processing_status[document_id] = {
+#             "status": "completed",
+#             "progress": 100,
+#             "message": "✅ Processing complete!",
+#             "result": {
+#                 "document_id": document_id,
+#                 "chunks_processed": len(documents),
+#                 "images_extracted": image_count,
+#                 "pickle_path": output_pickle_path,
+#                 "json_path": output_json_path,
+#                 "vector_store_path": vector_store_path
+#             }
+#         }
     
-    except Exception as e:
-        processing_status[document_id] = {
-            "status": "failed",
-            "progress": 0,
-            "message": f"❌ Error: {str(e)}"
-        }
-        print(f"Error processing PDF: {e}")
+#     except Exception as e:
+#         processing_status[document_id] = {
+#             "status": "failed",
+#             "progress": 0,
+#             "message": f"❌ Error: {str(e)}"
+#         }
+#         print(f"Error processing PDF: {e}")
 
 
 @router.post("/search")

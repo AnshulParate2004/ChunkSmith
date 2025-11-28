@@ -35,25 +35,44 @@ class ApiService {
   }
 
   async uploadPDF(file: File, settings: ProcessSettings) {
+    console.log('=== Upload Debug ===');
+    console.log('Selected language code:', settings.languages);
+    console.log('Full settings:', settings);
+    
+    // ✅ FIX: Build query parameters for the URL (like Swagger does)
+    const queryParams = new URLSearchParams({
+      max_characters: String(settings.maxCharacters),
+      new_after_n_chars: String(settings.newAfterNChars),
+      combine_text_under_n_chars: String(settings.combineTextUnderNChars),
+      extract_images: String(settings.extractImages),
+      extract_tables: String(settings.extractTables),
+      languages: settings.languages || 'english', // ✅ Send as query parameter
+    });
+
+    console.log('🔗 Query params:', queryParams.toString());
+    console.log('🌐 Language in URL:', settings.languages);
+
+    // ✅ Create FormData with ONLY the file
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('languages', settings.languages);
-    formData.append('extract_images', String(settings.extractImages));
-    formData.append('extract_tables', String(settings.extractTables));
-    formData.append('max_characters', String(settings.maxCharacters));
-    formData.append('new_after_n_chars', String(settings.newAfterNChars));
-    formData.append('combine_text_under_n_chars', String(settings.combineTextUnderNChars));
 
-    const response = await fetch(`${API_BASE_URL}/process-pdf`, {
+    // ✅ FIX: Append query parameters to URL (like Swagger)
+    const url = `${API_BASE_URL}/process-pdf?${queryParams.toString()}`;
+    console.log('📤 POST URL:', url);
+
+    const response = await fetch(url, {
       method: 'POST',
       body: formData,
+      // Don't set Content-Type - browser will set it with boundary
     });
 
     if (!response.ok) {
       throw new Error(`Upload failed: ${response.statusText}`);
     }
 
-    return response.json();
+    const result = await response.json();
+    console.log('✅ Upload response:', result);
+    return result;
   }
 
   async search(query: SearchQuery) {

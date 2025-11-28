@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Plus, MessageSquare, Globe, Settings, FileText, Sparkles, Upload, Search, X, Clock, CheckCircle, Loader2, ArrowLeft } from 'lucide-react';
 import { ChatInterface } from '@/components/Chat/ChatInterface';
@@ -43,7 +43,7 @@ const ProjectPage = () => {
   const [activeChatDoc, setActiveChatDoc] = useState<string | null>(null);
   
   const [settings, setSettings] = useState<ProcessSettings>({
-    languages: 'english',
+    languages: '',
     extractImages: true,
     extractTables: true,
     maxCharacters: 3000,
@@ -51,7 +51,10 @@ const ProjectPage = () => {
     combineTextUnderNChars: 200,
   });
 
-  // Load documents from localStorage on mount and check processing status
+  useEffect(() => {
+    console.log('🔧 Settings updated:', settings);
+  }, [settings]);
+
   useEffect(() => {
     const loadDocuments = () => {
       const savedDocs = localStorage.getItem(`project_${projectId}_docs`);
@@ -59,7 +62,6 @@ const ProjectPage = () => {
         let docs: UploadedDoc[] = JSON.parse(savedDocs);
         let hasUpdates = false;
         
-        // Check and update processing status for each document
         docs = docs.map(doc => {
           if (doc.status === 'processing') {
             const processingData = localStorage.getItem(`processing_${doc.documentId}`);
@@ -71,7 +73,6 @@ const ProjectPage = () => {
           return doc;
         });
         
-        // Persist updates if any status changed
         if (hasUpdates) {
           localStorage.setItem(`project_${projectId}_docs`, JSON.stringify(docs));
         }
@@ -81,13 +82,10 @@ const ProjectPage = () => {
     };
     
     loadDocuments();
-    
-    // Set up interval to check for updates
     const interval = setInterval(loadDocuments, 1000);
     return () => clearInterval(interval);
   }, [projectId]);
   
-  // Get project details from localStorage
   const getProjects = () => {
     const savedProjects = localStorage.getItem('projects');
     if (savedProjects) {
@@ -103,7 +101,6 @@ const ProjectPage = () => {
   const projects = getProjects();
   const currentProject = projects.find(p => p.id === projectId);
 
-  // Filter documents based on search
   const filteredDocs = uploadedDocs.filter(doc => 
     doc.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -154,8 +151,22 @@ const ProjectPage = () => {
   const handleFileSelect = (file: File) => setSelectedFile(file);
   const handleClearFile = () => setSelectedFile(null);
 
-  const handleUpload = async () => {
+  // ✅ FIX: Use useCallback to ensure fresh settings reference
+  const handleUpload = useCallback(async () => {
     if (!selectedFile) return;
+
+    if (!settings.languages || settings.languages.trim() === '') {
+      toast({
+        title: "Language not selected",
+        description: "Please select a document language before uploading",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    console.log('📤 Upload initiated with settings:', settings);
+    console.log('📝 Language being sent to backend:', settings.languages);
+    console.log('📄 File:', selectedFile.name);
 
     setIsUploading(true);
     try {
@@ -163,7 +174,7 @@ const ProjectPage = () => {
       
       toast({
         title: "File uploaded successfully!",
-        description: `Processing document: ${selectedFile.name}`,
+        description: `Processing document: ${selectedFile.name} (Language: ${settings.languages})`,
       });
 
       const newDoc: UploadedDoc = {
@@ -175,17 +186,14 @@ const ProjectPage = () => {
         projectId: projectId
       };
 
-      // Update state and localStorage
       const updatedDocs = [...uploadedDocs, newDoc];
       setUploadedDocs(updatedDocs);
       localStorage.setItem(`project_${projectId}_docs`, JSON.stringify(updatedDocs));
 
-      // Clear the file selection
       setSelectedFile(null);
-
-      // Navigate to processing page
       navigate(`/processing/${result.document_id}`);
     } catch (error) {
+      console.error('❌ Upload error:', error);
       toast({
         title: "Upload failed",
         description: error instanceof Error ? error.message : "Unknown error occurred",
@@ -194,7 +202,7 @@ const ProjectPage = () => {
     } finally {
       setIsUploading(false);
     }
-  };
+  }, [selectedFile, settings, uploadedDocs, projectId, toast, navigate]);
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -211,7 +219,6 @@ const ProjectPage = () => {
             <span className="text-xs text-muted-foreground">{uploadedDocs.length}</span>
           </div>
           
-          {/* Search Bar */}
           {uploadedDocs.length > 0 && (
             <div className="relative mb-4">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -275,7 +282,6 @@ const ProjectPage = () => {
         <div className="flex-1 p-8">
           <div className="max-w-4xl mx-auto h-full flex flex-col">
             {activeChatDoc ? (
-              // Active Chat View
               <div className="flex flex-col h-full">
                 <div className="flex items-center gap-4 mb-6">
                   <Button
@@ -299,7 +305,6 @@ const ProjectPage = () => {
                 </div>
               </div>
             ) : (
-              // Conversations List View
               <>
                 <div className="mb-8">
                   <div className="flex items-center gap-4 mb-4">
@@ -393,11 +398,32 @@ const ProjectPage = () => {
 
                   {selectedFile && (
                     <div className="mt-4">
-                      <UploadSettings settings={settings} onSettingsChange={setSettings} />
+                      <UploadSettings 
+                        settings={settings} 
+                        onSettingsChange={(newSettings) => {
+                          console.log('⚙️ UploadSettings callback - New settings:', newSettings);
+                          setSettings(newSettings);
+                        }} 
+                      />
+                      
+                      {settings.languages && (
+                        <div className="mt-3 p-3 bg-primary/10 rounded-lg border border-primary/20">
+                          <p className="text-xs text-muted-foreground">Selected language:</p>
+                          <p className="text-sm font-medium text-primary">{settings.languages}</p>
+                        </div>
+                      )}
+                      
+                      {!settings.languages && (
+                        <div className="mt-3 p-3 bg-yellow-500/10 rounded-lg border border-yellow-500/20">
+                          <p className="text-xs text-yellow-600 dark:text-yellow-400">
+                            ⚠️ Please select a language before uploading
+                          </p>
+                        </div>
+                      )}
                       
                       <Button 
                         onClick={handleUpload}
-                        disabled={isUploading}
+                        disabled={isUploading || !settings.languages}
                         className="w-full mt-4"
                       >
                         {isUploading ? (
