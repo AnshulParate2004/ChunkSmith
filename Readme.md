@@ -227,11 +227,4 @@ MIT License
 
 ---
 
-## 🤝 Contact
-
-**Issues:** [GitHub Issues](https://github.com/yourusername/chunksmite/issues)  
-**Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
-
----
-
 **Built with FastAPI, React, Gemini 2.5 Pro, ChromaDB**Claude can make mistakes. Please double-check responses.
