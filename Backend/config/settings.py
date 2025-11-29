@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     
     # AI Model settings
     GEMINI_MODEL: str = "gemini-2.5-pro"
-    EMBEDDING_MODEL: str = "text-embedding-004"
+    EMBEDDING_MODEL: str = "models/text-embedding-004"
     TEMPERATURE: float = 0.0
     
     # API settings
