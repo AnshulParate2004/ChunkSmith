@@ -24,7 +24,7 @@ class AIParser(BaseModel):
 class ContentProcessor:
     """Processes document chunks with AI-enhanced summaries using multiple API keys"""
     
-    def __init__(self, image_dir: str, model_name: str = "gemini-2.0-flash-exp", temperature: float = 0):
+    def __init__(self, image_dir: str, model_name: str = "gemini-2.5-pro", temperature: float = 0):
         self.image_dir = image_dir
         self.model_name = model_name
         self.temperature = temperature
@@ -52,7 +52,7 @@ class ContentProcessor:
         api_keys = []
         
         # Try to load numbered API keys (1-10)
-        for i in range(1, 11):
+        for i in range(1, 8):
             key = os.getenv(f"GOOGLE_API_KEY_{i}")
             if key and key.strip():
                 api_keys.append(key.strip())
