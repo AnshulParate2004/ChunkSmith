@@ -227,4 +227,4 @@ MIT License
 
 ---
 
-**Built with FastAPI, React, Gemini 2.5 Pro, ChromaDB**Claude can make mistakes. Please double-check responses.
+**Built with FastAPI, React, Gemini 2.5 Pro, ChromaDB**
