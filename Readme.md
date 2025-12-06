@@ -1,4 +1,4 @@
-markdown# ChunkSmite 🚀
+# ChunkSmite 🚀
 
 **Multimodal RAG System with Image Extraction & Retrieval**
 
