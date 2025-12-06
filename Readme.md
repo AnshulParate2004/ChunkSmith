@@ -8,12 +8,64 @@ Extract, process, and chat with PDF documents while preserving actual images fro
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-18+-61DAFB.svg)](https://reactjs.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
+[![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://multi-modul-rag.vercel.app/)
+
+---
+
+## 🎬 See It In Action
+
+Watch ChunkSmith extract and retrieve images from PDFs in real-time:
+
+[![ChunkSmith Demo](https://img.youtube.com/vi/a9Haiu-e7ZU/maxresdefault.jpg)](https://www.youtube.com/watch?v=a9Haiu-e7ZU)
+
+**[▶️ Watch Full Demo](https://www.youtube.com/watch?v=a9Haiu-e7ZU)** | **[🚀 Try Live Demo](https://multi-modul-rag.vercel.app/)**
+
+---
+
+## 💡 Why ChunkSmith?
+
+Most RAG systems **lose images** during document processing. ChunkSmith is different:
+
+✅ **Preserves actual images** from PDFs  
+✅ **Returns visual context** with answers  
+✅ **Extracts tables** as structured data  
+✅ **Supports 90+ languages** with OCR  
+✅ **Production-ready** with Docker deployment  
+
+---
+
+## ⚡ Quick Start
+
+### Try It Instantly (No Installation)
+👉 **[Live Demo](https://multi-modul-rag.vercel.app/)**
+
+### Run Locally with Docker
+```bash
+# Pull the image
+docker pull anshulnp/chunksmith-backend:latest
+
+# Run the backend
+docker run -p 8000:8000 -e GEMINI_API_KEY=your_key anshulnp/chunksmith-backend:latest
+
+# Access at http://localhost:8000
+```
+
+**For detailed setup:** See our [Setup Guide](./SETUP.md)
 
 ---
 
 ## 🎯 Overview
 
 ChunkSmith is a powerful multimodal RAG (Retrieval-Augmented Generation) system that enables intelligent document processing and chat capabilities. It extracts text, images, and tables from PDFs, processes them using advanced AI models, and provides context-aware responses with visual support.
+
+### What Makes It Special?
+
+Unlike traditional RAG systems that strip away visual information, ChunkSmith:
+- 🖼️ **Preserves original images** and returns them contextually
+- 📊 **Extracts tables** maintaining structure and relationships
+- 🌐 **Processes documents** in 90+ languages with Tesseract OCR
+- ⚡ **Scales efficiently** with async processing and load balancing
+- 💬 **Provides intelligent answers** with both text and visual context
 
 ---
 
@@ -53,28 +105,27 @@ ChunkSmith is a powerful multimodal RAG (Retrieval-Augmented Generation) system 
 
 ---
 
-## 🚀 Getting Started
+## 📊 ChunkSmith vs Traditional RAG
 
-### Docker Deployment (Recommended)
+| Feature | Traditional RAG | ChunkSmith |
+|---------|-----------------|------------|
+| Image Retrieval | ❌ Lost during processing | ✅ Preserved & contextual |
+| Table Extraction | ⚠️ Limited/text-only | ✅ Structured extraction |
+| Multi-language OCR | ❌ Usually English only | ✅ 90+ languages |
+| Live Demo | ❌ Rarely available | ✅ [Try it now](https://multi-modul-rag.vercel.app/) |
+| Docker Deployment | ⚠️ Complex setup | ✅ One-command deploy |
+| Streaming Responses | ⚠️ Sometimes | ✅ Real-time SSE |
+| Visual Context | ❌ | ✅ Images with answers |
 
-For quick and easy deployment using Docker, please refer to our comprehensive setup guide:
+---
 
-**📖 [Setup Guide](./setup.md)**
+## 🚦 Quick Start Workflow
 
-The setup guide includes:
-- Docker installation and prerequisites
-- Environment configuration
-- Container management commands
-- Troubleshooting tips
-- Frontend integration
-
-### Frontend Access
-
-The ChunkSmith frontend is hosted and accessible at:
-
-**🌐 https://multi-modul-rag.vercel.app/**
-
-Simply configure your API endpoint in the frontend to point to your running backend instance (default: `http://localhost:8000`).
+1. **Deploy Backend** - Follow [SETUP.md](./SETUP.md) to run Docker container
+2. **Access Frontend** - Open https://multi-modul-rag.vercel.app/
+3. **Configure API** - Set API URL to `http://localhost:8000` in frontend
+4. **Upload PDF** - Upload your PDF document through the UI
+5. **Start Chatting** - Ask questions about your document with image support
 
 ---
 
@@ -151,7 +202,8 @@ ChunkSmith/
 │   │   └── metadata/              # Document metadata
 │   ├── requirements.txt           # Python dependencies
 │   └── Dockerfile                 # Docker configuration
-├── setup.md                       # Detailed setup instructions
+├── Frontend/                      # React frontend application
+├── SETUP.md                       # Detailed setup instructions
 └── Readme.md                      # This file
 ```
 
@@ -193,28 +245,27 @@ ChunkSmith supports 70+ languages for OCR including:
 
 ---
 
-## 🚦 Quick Start Workflow
-
-1. **Deploy Backend** - Follow [setup.md](./setup.md) to run Docker container
-2. **Access Frontend** - Open https://multi-modul-rag.vercel.app/
-3. **Configure API** - Set API URL to `http://localhost:8000` in frontend
-4. **Upload PDF** - Upload your PDF document through the UI
-5. **Start Chatting** - Ask questions about your document with image support
-
----
-
 ## 🔗 Links & Resources
 
-- **Live Frontend:** https://multi-modul-rag.vercel.app/
-- **Docker Image:** `docker pull anshulnp/chunksmith-backend:latest`
-- **API Docs:** http://localhost:8000/docs (when running locally)
-- **Setup Guide:** [setup.md](./setup.md)
+- **🎬 Demo Video:** https://www.youtube.com/watch?v=a9Haiu-e7ZU
+- **🚀 Live Demo:** https://multi-modul-rag.vercel.app/
+- **🐳 Docker Image:** `docker pull anshulnp/chunksmith-backend:latest`
+- **📖 API Docs:** http://localhost:8000/docs (when running locally)
+- **📋 Setup Guide:** [SETUP.md](./SETUP.md)
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Here's how you can help:
+
+1. ⭐ Star this repository
+2. 🐛 Report bugs or suggest features via [Issues](../../issues)
+3. 🔀 Submit Pull Requests
+4. 📖 Improve documentation
+5. 🎥 Share your use case or demo
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines.
 
 ---
 
@@ -226,8 +277,33 @@ MIT License - feel free to use this project for personal or commercial purposes.
 
 ## 📞 Support
 
-For issues, questions, or feature requests, please open an issue on the repository.
+- 💬 **Issues:** [GitHub Issues](../../issues)
+- 📧 **Email:** [Contact via GitHub profile]
+- 🐦 **Social:** Share your experience with #ChunkSmith
 
 ---
 
-**Built with ❤️ By Anshul Parate**
+## 🙏 Acknowledgments
+
+Built with powerful open-source tools:
+- Google Gemini for AI capabilities
+- LangChain for RAG framework
+- ChromaDB for vector storage
+- Tesseract for OCR
+- FastAPI & React for the stack
+
+---
+
+## ⭐ Show Your Support
+
+If ChunkSmith helps you, please consider:
+- ⭐ Starring the repository
+- 🐦 Sharing on social media
+- 📝 Writing a blog post about your use case
+- 🎥 Creating a tutorial or demo
+
+---
+
+**Built with ❤️ by Anshul Parate**
+
+[⬆ Back to Top](#chunksmith-)
