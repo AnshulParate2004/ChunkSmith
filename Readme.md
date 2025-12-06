@@ -59,7 +59,7 @@ ChunkSmith is a powerful multimodal RAG (Retrieval-Augmented Generation) system 
 
 For quick and easy deployment using Docker, please refer to our comprehensive setup guide:
 
-**📖 [Setup Guide](./setup.md)**
+**📖 [Setup Guide](./SETUP.md)**
 
 The setup guide includes:
 - Docker installation and prerequisites
