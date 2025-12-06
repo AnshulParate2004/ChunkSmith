@@ -1,4 +1,4 @@
-# ChunkSmite 🚀
+# ChunkSmith 🚀
 
 **Multimodal RAG System with Image Extraction & Retrieval**
 
@@ -7,224 +7,227 @@ Extract, process, and chat with PDF documents while preserving actual images fro
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-18+-61DAFB.svg)](https://reactjs.org/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
 ---
 
-## ✨ Features
+## 🎯 Overview
+
+ChunkSmith is a powerful multimodal RAG (Retrieval-Augmented Generation) system that enables intelligent document processing and chat capabilities. It extracts text, images, and tables from PDFs, processes them using advanced AI models, and provides context-aware responses with visual support.
+
+---
+
+## ✨ Key Features
 
 - 🖼️ **Image Retrieval** - Returns actual images from PDFs in responses
-- 🌍 **70+ Languages** - Multi-language OCR support
-- ⚡ **Async Processing** - Multi-API key load balancing
-- 💬 **Smart Chat** - Context-aware Q&A with visual support
+- 🌍 **90+ Languages** - Multi-language OCR support with Tesseract
+- ⚡ **Async Processing** - Multi-API key load balancing for high throughput
+- 💬 **Smart Chat** - Context-aware Q&A with visual and textual support
 - 📦 **Data Export** - Download chunks, images, and embeddings
+- 🔄 **Streaming Responses** - Real-time Server-Sent Events (SSE) for chat
+- 🎨 **Modern UI** - Intuitive React-based frontend
+- 🐳 **Docker Ready** - Easy deployment with Docker containers
 
 ---
 
 ## 🛠️ Tech Stack
 
-**Backend:** FastAPI, Python, Gemini 2.5 Pro, LangChain, ChromaDB, Tesseract OCR  
-**Frontend:** React, Axios, TailwindCSS  
-**Storage:** ChromaDB, JSON, Pickle
+**Backend:**
+- FastAPI - High-performance async web framework
+- Google Gemini 2.5 Pro - Advanced AI model for processing
+- LangChain - Framework for LLM applications
+- ChromaDB - Vector database for embeddings
+- Tesseract OCR - Multi-language text extraction
+- PyMuPDF - PDF processing
+
+**Frontend:**
+- React 18+ - Modern UI framework
+- Axios - HTTP client
+- TailwindCSS - Utility-first CSS
+- Deployed on Vercel
+
+**Storage & Infrastructure:**
+- ChromaDB - Vector storage
+- JSON - Metadata storage
+- Docker - Containerization
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Getting Started
 
-### Prerequisites
-- Python 3.10+
-- Node.js 16+
-- Tesseract OCR
-- Google Gemini API Key
+### Docker Deployment (Recommended)
 
-### Install Tesseract
-```bash
-# Windows
-https://github.com/UB-Mannheim/tesseract/wiki
+For quick and easy deployment using Docker, please refer to our comprehensive setup guide:
 
-# Linux
-sudo apt install tesseract-ocr libtesseract-dev
+**📖 [Setup Guide](./setup.md)**
 
-# macOS
-brew install tesseract
-```
+The setup guide includes:
+- Docker installation and prerequisites
+- Environment configuration
+- Container management commands
+- Troubleshooting tips
+- Frontend integration
 
-### Backend Setup
-```bash
-cd Backend
-pip install -r requirements.txt
-```
+### Frontend Access
 
-Create `Backend/.env`:
-```env
-GOOGLE_API_KEY=your_api_key_here
-GEMINI_MODEL=gemini-2.5-pro
-EMBEDDING_MODEL=text-embedding-004
-```
+The ChunkSmith frontend is hosted and accessible at:
 
-Get API key: [Google AI Studio](https://makersuite.google.com/app/apikey)
+**🌐 https://multi-modul-rag.vercel.app/**
 
-**Run:**
-```bash
-python main.py
-```
-Backend: `http://localhost:8000`
-
-### Frontend Setup
-```bash
-cd Frontend
-npm install
-```
-
-Create `Frontend/.env`:
-```env
-REACT_APP_API_BASE_URL=http://localhost:8000
-```
-
-**Run:**
-```bash
-npm start
-```
-Frontend: `http://localhost:3000`
+Simply configure your API endpoint in the frontend to point to your running backend instance (default: `http://localhost:8000`).
 
 ---
 
-## 📚 API Endpoints
+## 📚 API Documentation
+
+### Core Endpoints
+
+#### Document Processing
 ```http
-POST   /api/process-pdf                    # Upload & process PDF
-GET    /api/process-pdf-stream/{doc_id}    # Stream progress (SSE)
-POST   /api/chat/init/{doc_id}             # Initialize chat
-GET    /api/chat/stream/{session_id}       # Chat with streaming (SSE)
-GET    /api/documents/{doc_id}/chunks      # Download processed data
-POST   /api/search                         # Vector search
-GET    /api/documents                      # List documents
-DELETE /api/documents/{doc_id}             # Delete document
-GET    /api/languages                      # Supported languages
-GET    /api/health                         # Health check
+POST   /api/process-pdf
 ```
+Upload and process PDF documents with text extraction, image extraction, and AI-powered analysis.
+
+#### Progress Streaming
+```http
+GET    /api/process-pdf-stream/{doc_id}
+```
+Server-Sent Events endpoint for real-time processing updates.
+
+#### Chat Initialization
+```http
+POST   /api/chat/init/{doc_id}
+```
+Initialize a chat session for a processed document.
+
+#### Chat Streaming
+```http
+GET    /api/chat/stream/{session_id}?message={query}
+```
+Stream chat responses with context-aware answers and relevant images.
+
+#### Data Export
+```http
+GET    /api/documents/{doc_id}/chunks
+```
+Download processed document data including chunks, images, and embeddings.
+
+#### Vector Search
+```http
+POST   /api/search
+```
+Perform semantic search across document embeddings.
+
+#### Document Management
+```http
+GET    /api/documents              # List all documents
+DELETE /api/documents/{doc_id}    # Delete document
+GET    /api/languages              # Supported OCR languages
+GET    /api/health                 # Health check
+```
+
+**Full API Documentation:** Access interactive Swagger docs at `http://localhost:8000/docs` when backend is running.
 
 ---
 
-## 💡 Usage
+## 🏗️ Project Architecture
 
-### Python
-```python
-import requests
-
-# Upload PDF
-files = {'file': open('document.pdf', 'rb')}
-response = requests.post('http://localhost:8000/api/process-pdf', files=files)
-doc_id = response.json()['document_id']
-
-# Chat
-chat = requests.post(f'http://localhost:8000/api/chat/init/{doc_id}')
-session_id = chat.json()['session_id']
 ```
-
-### JavaScript
-```javascript
-// Initialize chat
-const response = await fetch(`http://localhost:8000/api/chat/init/${docId}`, {
-  method: 'POST'
-});
-const { session_id } = await response.json();
-
-// Stream responses
-const eventSource = new EventSource(
-  `http://localhost:8000/api/chat/stream/${session_id}?message=${encodeURIComponent(question)}`
-);
-
-eventSource.addEventListener('message', (e) => {
-  const data = JSON.parse(e.data);
-  if (data.type === 'content') console.log(data.data.content);
-  if (data.type === 'image') console.log('Image:', data.data.filename);
-});
-```
-
----
-
-## 🏗️ Project Structure
-```
-chunksmite/
+ChunkSmith/
 ├── Backend/
-│   ├── main.py                    # Entry point
-│   ├── api/routes.py              # Endpoints
+│   ├── main.py                    # FastAPI application entry point
+│   ├── api/
+│   │   └── routes.py              # API endpoints
 │   ├── core/
-│   │   ├── document_parser.py     # PDF parsing
-│   │   ├── content_processor.py   # AI processing
-│   │   ├── vector_store.py        # Vector DB
-│   │   └── chat_agent.py          # Chat logic
-│   └── data/                      # Generated files
-└── Frontend/
-    ├── src/
-    │   ├── components/
-    │   └── services/
-    └── package.json
-```
-
----
-
-## 🐳 Docker
-```yaml
-# docker-compose.yml
-version: '3.8'
-services:
-  backend:
-    build: ./Backend
-    ports: ["8000:8000"]
-    environment:
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-  frontend:
-    build: ./Frontend
-    ports: ["3000:80"]
-```
-
-**Run:**
-```bash
-docker-compose up -d
+│   │   ├── document_parser.py     # PDF parsing and extraction
+│   │   ├── content_processor.py   # AI-powered content processing
+│   │   ├── vector_store.py        # ChromaDB vector operations
+│   │   └── chat_agent.py          # Chat logic and RAG
+│   ├── models/                    # Pydantic models
+│   ├── utils/                     # Helper functions
+│   ├── data/                      # Generated data storage
+│   │   ├── chroma_db/             # Vector database
+│   │   ├── images/                # Extracted images
+│   │   └── metadata/              # Document metadata
+│   ├── requirements.txt           # Python dependencies
+│   └── Dockerfile                 # Docker configuration
+├── setup.md                       # Detailed setup instructions
+└── Readme.md                      # This file
 ```
 
 ---
 
 ## 🔧 Configuration
 
-### Environment Variables
-```env
-# API Keys (multiple for load balancing)
-GOOGLE_API_KEY_1=key1
-GOOGLE_API_KEY_2=key2
+### Supported Languages
 
-# Processing
-MAX_CHARACTERS=3000
-EXTRACT_IMAGES=True
-EXTRACT_TABLES=True
+ChunkSmith supports 70+ languages for OCR including:
+- **European:** English, Spanish, French, German, Italian, Portuguese, Russian
+- **Indic:** Hindi, Bengali, Tamil, Telugu, Gujarati, Marathi, Punjabi
+- **East Asian:** Chinese (Simplified & Traditional), Japanese, Korean
+- **Middle Eastern:** Arabic, Hebrew, Persian, Turkish
+- And many more...
 
-# Languages (comma-separated)
-LANGUAGES=english,hindi,spanish
-```
+### Processing Options
 
----
-
-## 🚨 Troubleshooting
-
-**Tesseract not found:**
-```bash
-tesseract --version  # Verify installation
-```
-
-**API key error:**
-- Check `.env` file exists with valid key
-- Enable Gemini API at Google Cloud Console
-
-**Memory error:**
-- Reduce `MAX_CHARACTERS` in config
-- Process smaller PDFs
+| Option | Description | Default |
+|--------|-------------|---------|
+| `MAX_CHARACTERS` | Maximum characters per chunk | 3000 |
+| `EXTRACT_IMAGES` | Enable/disable image extraction | true |
+| `EXTRACT_TABLES` | Enable/disable table extraction | true |
+| `MAX_UPLOAD_SIZE` | Maximum PDF file size | 50MB |
+| `ALLOWED_EXTENSIONS` | Supported file types | [".pdf"] |
 
 ---
 
-## 📝 License
+## 🌟 Use Cases
 
-MIT License
+- 📚 **Document Analysis** - Extract insights from research papers and reports
+- 📖 **E-Learning** - Interactive textbook chat and Q&A systems
+- 🏢 **Enterprise Knowledge Base** - Build searchable knowledge repositories
+- 📰 **Content Processing** - Automated content extraction and summarization
+- 🔍 **Research & Investigation** - Quick information retrieval from large documents
+- 💼 **Legal & Compliance** - Document review and analysis
+- 🏥 **Medical Records** - Healthcare document processing
+- 📊 **Data Extraction** - Table and structured data extraction from PDFs
 
 ---
 
-**Built with FastAPI, React, Gemini 2.5 Pro, ChromaDB**
+## 🚦 Quick Start Workflow
+
+1. **Deploy Backend** - Follow [setup.md](./setup.md) to run Docker container
+2. **Access Frontend** - Open https://multi-modul-rag.vercel.app/
+3. **Configure API** - Set API URL to `http://localhost:8000` in frontend
+4. **Upload PDF** - Upload your PDF document through the UI
+5. **Start Chatting** - Ask questions about your document with image support
+
+---
+
+## 🔗 Links & Resources
+
+- **Live Frontend:** https://multi-modul-rag.vercel.app/
+- **Docker Image:** `docker pull anshulnp/chunksmith-backend:latest`
+- **API Docs:** http://localhost:8000/docs (when running locally)
+- **Setup Guide:** [setup.md](./setup.md)
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+---
+
+## 📄 License
+
+MIT License - feel free to use this project for personal or commercial purposes.
+
+---
+
+## 📞 Support
+
+For issues, questions, or feature requests, please open an issue on the repository.
+
+---
+
+**Built with ❤️ By Anshul Parate**
