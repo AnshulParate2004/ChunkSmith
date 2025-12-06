@@ -1,24 +1,39 @@
-version: "3.9"
+version: '3.8'
 
 services:
   backend:
     build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: multimodal-rag-backend
+      context: ..
+      dockerfile: Backend/Dockerfile
+    container_name: chunksmith-backend
     ports:
       - "8000:8000"
+    environment:
+      # API Keys (load from .env file)
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      # App settings
+      - PYTHONUNBUFFERED=1
     env_file:
       - .env
-    restart: unless-stopped
     volumes:
-      - .:/app  # mount local code for hot-reload
-    command: >
-      uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
-  chroma-db:
-    image: ghcr.io/chroma-core/chroma:latest
-    container_name: chroma-db
-    ports:
-      - "8001:8000"
+      # Mount data directory for persistence
+      - ./data:/app/data
+      # Mount code for development (optional - comment out for production)
+      - .:/app
     restart: unless-stopped
+    networks:
+      - chunksmith-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  chunksmith-network:
+    driver: bridge
+
+volumes:
+  chunksmith-data:
