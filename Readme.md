@@ -105,28 +105,27 @@ Unlike traditional RAG systems that strip away visual information, ChunkSmith:
 
 ---
 
-## 🚀 Getting Started
+## 📊 ChunkSmith vs Traditional RAG
 
-### Docker Deployment (Recommended)
+| Feature | Traditional RAG | ChunkSmith |
+|---------|-----------------|------------|
+| Image Retrieval | ❌ Lost during processing | ✅ Preserved & contextual |
+| Table Extraction | ⚠️ Limited/text-only | ✅ Structured extraction |
+| Multi-language OCR | ❌ Usually English only | ✅ 90+ languages |
+| Live Demo | ❌ Rarely available | ✅ [Try it now](https://multi-modul-rag.vercel.app/) |
+| Docker Deployment | ⚠️ Complex setup | ✅ One-command deploy |
+| Streaming Responses | ⚠️ Sometimes | ✅ Real-time SSE |
+| Visual Context | ❌ | ✅ Images with answers |
 
-For quick and easy deployment using Docker, please refer to our comprehensive setup guide:
+---
 
-**📖 [Setup Guide](./setup.md)**
+## 🚦 Quick Start Workflow
 
-The setup guide includes:
-- Docker installation and prerequisites
-- Environment configuration
-- Container management commands
-- Troubleshooting tips
-- Frontend integration
-
-### Frontend Access
-
-The ChunkSmith frontend is hosted and accessible at:
-
-**🌐 https://multi-modul-rag.vercel.app/**
-
-Simply configure your API endpoint in the frontend to point to your running backend instance (default: `http://localhost:8000`).
+1. **Deploy Backend** - Follow [SETUP.md](./SETUP.md) to run Docker container
+2. **Access Frontend** - Open https://multi-modul-rag.vercel.app/
+3. **Configure API** - Set API URL to `http://localhost:8000` in frontend
+4. **Upload PDF** - Upload your PDF document through the UI
+5. **Start Chatting** - Ask questions about your document with image support
 
 ---
 
