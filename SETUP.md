@@ -193,3 +193,5 @@ docker run -d -p 8000:8000 --name chunksmith --env-file <env_path> anshulnp/chun
 ## Support
 
 For issues or questions, please refer to the project documentation or contact the development team.
+
+**Built with ❤️ By Anshul Parate**
