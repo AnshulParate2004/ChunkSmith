@@ -288,7 +288,7 @@ TEXT CONTENT:
             print(f"Chunk {chunk_index}: Error - {str(e)[:100]}")
             print(f"Chunk {chunk_index}: Using fallback summary")
             
-            fallback_summary = f"{text[:300]}..."
+            fallback_summary = f"[FALLBACK_SUMMARY]..."
             if tables:
                 fallback_summary += f"\n[Contains {len(tables)} table(s)]"
             if images:
@@ -297,8 +297,8 @@ TEXT CONTENT:
             return AIParser(
                 question="Unable to generate questions due to processing error",
                 summary=fallback_summary,
-                image_interpretation=["***DO NOT USE THIS IMAGE***" for _ in images] if images else [],
-                table_interpretation=["***DO NOT USE THIS TABLE***" for _ in tables] if tables else []
+                image_interpretation=["***IMAGE SUMMARY FAILED***" for _ in images] if images else [],
+                table_interpretation=["***TABLE SUMMARY FAILED***" for _ in tables] if tables else []
             )
     
     async def process_chunks_async(self, chunks_data: List[Dict]) -> List[AIParser]:
@@ -369,7 +369,7 @@ TEXT CONTENT:
                   f"Tables: {len(content_data['tables'])}, "
                   f"Images: {len(content_data['image_base64'])}")
             if content_data['page_no']:
-                print(f"     Pages: {content_data['page_no']}")
+                print(f"Pages: {content_data['page_no']}")
             
             chunks_data.append(content_data)
         
@@ -378,8 +378,8 @@ TEXT CONTENT:
         
         # Step 2: Process all chunks asynchronously with different API keys
         print(f"\nStarting async AI processing...")
-        print(f"   Using {len(self.api_keys)} API key(s)")
-        print(f"   Processing {total_chunks} chunk(s)")
+        print(f"Using {len(self.api_keys)} API key(s)")
+        print(f"Processing {total_chunks} chunk(s)")
         
         # Run async processing
         ai_responses = asyncio.run(self.process_chunks_async(chunks_data))
@@ -393,21 +393,22 @@ TEXT CONTENT:
             # Prepare image analysis text as string with image path and interpretation
             # For images
             img_analysis_text = "\n".join(
-                [f"Image Path {content_data['images_dirpath'][i]}: {ai_response.image_interpretation[i]}" 
+                [f"Image Path {content_data['images_dirpath'][i]} : {ai_response.image_interpretation[i]}" 
                 for i in range(len(ai_response.image_interpretation))]
-            ) if ai_response.image_interpretation else "No images found"
+            ) if ai_response.image_interpretation else "No images present"
 
             # For tables
             table_analysis_text = "\n".join(
-                [f"Table index {i} chunk index {idx}: {ai_response.table_interpretation[i]}"
+                [f"Table index {i} : {ai_response.table_interpretation[i]}"
                 for i in range(len(ai_response.table_interpretation))]
-            ) if ai_response.table_interpretation else "No tables found"
+            ) if ai_response.table_interpretation else "No tables present"
 
 
             combined_content = f"""QUESTIONS: {ai_response.question}
 SUMMARY: {ai_response.summary}
 IMAGE ANALYSIS: {img_analysis_text}
-TABLE ANALYSIS: {table_analysis_text}"""
+TABLE ANALYSIS: {table_analysis_text}
+ORIGINAL TEXT: {content_data['text']}"""
             
             print(f"Document {i}: {ai_response.summary[:100]}...")
             
@@ -415,7 +416,7 @@ TABLE ANALYSIS: {table_analysis_text}"""
             doc = Document(
                 page_content=combined_content,
                 metadata={
-                    "chunk_index": i,
+                    "chunk_index": idx,
                     "original_text": content_data['text'],
                     "raw_tables_html": content_data['tables'],
                     "ai_questions": ai_response.question,
