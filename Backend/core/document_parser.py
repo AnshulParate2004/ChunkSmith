@@ -67,11 +67,11 @@ class DocumentParser:
                 if lang in SUPPORTED_LANGUAGES.values():
                     codes.append(lang)
                 else:
-                    print(f"⚠️  Warning: Unknown language '{lang}', skipping")
+                    print(f"Warning: Unknown language '{lang}', skipping")
         
         # Default to English if no valid languages
         if not codes:
-            print("⚠️  No valid languages found, defaulting to English")
+            print("No valid languages found, defaulting to English")
             codes = ['eng']
         
         return codes
@@ -112,9 +112,9 @@ class DocumentParser:
         # Convert language names to codes
         language_codes = self.get_language_codes(languages)
         
-        print(f"📄 Partitioning document: {file_path}")
-        print(f"⚙️  Settings: Images={extract_images}, Tables={extract_tables}, Languages={language_codes}")
-        print(f"📊 Chunk settings: max={max_characters}, new_after={new_after_n_chars}, combine={combine_text_under_n_chars}")
+        print(f"Partitioning document: {file_path}")
+        print(f"Settings: Images={extract_images}, Tables={extract_tables}, Languages={language_codes}")
+        print(f"Chunk settings: max={max_characters}, new_after={new_after_n_chars}, combine={combine_text_under_n_chars}")
 
         elements = partition_pdf(
             filename=file_path,
@@ -133,13 +133,13 @@ class DocumentParser:
             combine_text_under_n_chars=combine_text_under_n_chars,
         )
         
-        print(f"✅ Extracted {len(elements)} elements")
+        print(f"Extracted {len(elements)} elements")
         
         # Print element breakdown
         element_types = {}
         for elem in elements:
             elem_type = type(elem).__name__
             element_types[elem_type] = element_types.get(elem_type, 0) + 1
-        print(f"📋 Element breakdown: {dict(element_types)}")
+        print(f"Element breakdown: {dict(element_types)}")
         
         return elements

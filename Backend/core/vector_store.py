@@ -10,7 +10,7 @@ from langchain_chroma import Chroma
 class VectorStoreManager:
     """Manages ChromaDB vector store operations"""
     
-    def __init__(self, embedding_model: str = "text-embedding-004"):
+    def __init__(self, embedding_model: str ):
         self.embedding_model = GoogleGenerativeAIEmbeddings(model=embedding_model)
     
     @staticmethod
@@ -68,21 +68,63 @@ class VectorStoreManager:
         Returns:
             ChromaDB vector store instance
         """
-        print("🔮 Creating embeddings and storing in ChromaDB...")
+        print("Creating embeddings and storing in ChromaDB...")
         
         # Sanitize collection name
         original_name = collection_name
         collection_name = self.sanitize_collection_name(collection_name)
         
         if original_name != collection_name:
-            print(f"ℹ️  Collection name sanitized: '{original_name}' -> '{collection_name}'")
+            print(f"Collection name sanitized: '{original_name}' -> '{collection_name}'")
+        
+        
+        # clean_json = [
+        #     {
+        #         "chunk_index": doc.metadata.get("chunk_index"),
+        #         "enhanced_content": doc.page_content,
+        #         "original_text": doc.metadata.get("original_text", ""),
+        #         "raw_tables_html": doc.metadata.get("raw_tables_html", []),
+        #         "ai_questions": doc.metadata.get("ai_questions", ""),
+        #         "ai_summary": doc.metadata.get("ai_summary", ""),
+        #         "image_interpretation": doc.metadata.get("image_interpretation", ""),
+        #         "table_interpretation": doc.metadata.get("table_interpretation", ""),
+        #         "image_paths": doc.metadata.get("image_paths", []),
+        #         "image_base64": doc.metadata.get("image_base64", []),
+        #         "page_numbers": doc.metadata.get("page_numbers", []),
+        #         "content_types": doc.metadata.get("content_types", []),
+        #     }
+        #     for doc in data
+        # ]
+
+        # doc = Document(
+        #         page_content=combined_content,
+        #         metadata={
+        #             "chunk_index": i,
+        #             "original_text": content_data['text'],
+        #             "raw_tables_html": content_data['tables'], ---------- #List[str]
+        #             "ai_questions": ai_response.question,
+        #             "ai_summary": ai_response.summary,
+        #             "image_interpretation": ai_response.image_interpretation, ---------- #List[str]
+        #             "table_interpretation": ai_response.table_interpretation, ---------- #List[str]
+        #             "image_paths": content_data['images_dirpath'], ---------- #List[str]
+        #             "image_base64": content_data['image_base64'], ---------- #List[str]
+        #             "page_numbers": content_data['page_no'], ---------- #List[str]
+        #             "content_types": content_data['types'], ---------- #List[str]
+        #         }
+        #     )
         
         # Convert list metadata to JSON strings (ChromaDB requirement)
         for doc in documents:
             if "raw_tables_html" in doc.metadata:
                 doc.metadata["raw_tables_html"] = json.dumps(doc.metadata["raw_tables_html"])
+            if "image_interpretation" in doc.metadata:
+                doc.metadata["image_interpretation"] = json.dumps(doc.metadata["image_interpretation"])
+            if "table_interpretation" in doc.metadata:
+                doc.metadata["table_interpretation"] = json.dumps(doc.metadata["table_interpretation"])
             if "image_paths" in doc.metadata:
                 doc.metadata["image_paths"] = json.dumps(doc.metadata["image_paths"])
+            if "image_base64" in doc.metadata:
+                doc.metadata["image_base64"] = json.dumps(doc.metadata["image_base64"])
             if "page_numbers" in doc.metadata:
                 doc.metadata["page_numbers"] = json.dumps(doc.metadata["page_numbers"])
             if "content_types" in doc.metadata:
@@ -98,9 +140,9 @@ class VectorStoreManager:
         )
         print("--- Finished creating vector store ---")
         
-        print(f"✅ Vector store created with {len(documents)} documents")
-        print(f"💾 Saved to {persist_directory}")
-        print(f"📦 Collection name: {collection_name}")
+        print(f"Vector store created with {len(documents)} documents")
+        print(f"Saved to {persist_directory}")
+        print(f"Collection name: {collection_name}")
         
         return vectorstore
     
@@ -119,7 +161,7 @@ class VectorStoreManager:
         Returns:
             ChromaDB vector store instance
         """
-        print(f"📂 Loading vector store from {persist_directory}")
+        print(f"Loading vector store from {persist_directory}")
         
         # Sanitize collection name
         collection_name = self.sanitize_collection_name(collection_name)
@@ -130,7 +172,7 @@ class VectorStoreManager:
             collection_name=collection_name
         )
         
-        print(f"✅ Vector store loaded successfully")
+        print(f"Vector store loaded successfully")
         return vectorstore
     
     def search(
@@ -152,12 +194,12 @@ class VectorStoreManager:
         Returns:
             List of relevant documents
         """
-        print(f"🔍 Searching for: {query}")
+        print(f"Searching for: {query}")
         
         if filter_dict:
             results = vectorstore.similarity_search(query, k=k, filter=filter_dict)
         else:
             results = vectorstore.similarity_search(query, k=k)
         
-        print(f"✅ Found {len(results)} results")
+        print(f"Found {len(results)} results")
         return results

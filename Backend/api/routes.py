@@ -232,7 +232,7 @@ async def process_pdf_background(
             "step": 1,
             "step_name": "upload",
             "progress": 5,
-            "message": "📤 File uploaded and validated"
+            "message": "File uploaded and validated"
         }
         await asyncio.sleep(0.5)  # Brief pause for UI
         
@@ -242,15 +242,15 @@ async def process_pdf_background(
             "step": 2,
             "step_name": "parsing",
             "progress": 10,
-            "message": "🔍 Step 2: Parsing PDF document..."
+            "message": "Step 2: Parsing PDF document..."
         }
         
-        # ✅ Convert comma-separated languages to list
+        # Convert comma-separated languages to list
         # The DocumentParser.get_language_codes() will handle the conversion
         language_list = [lang.strip() for lang in languages.split(',')]
         
         # Debug logging
-        print(f"📝 Input languages from frontend: {language_list}")
+        print(f"Input languages from frontend: {language_list}")
         
         parser = DocumentParser(image_output_dir=str(settings.IMAGE_DIR))
         
@@ -276,7 +276,7 @@ async def process_pdf_background(
             "step": 2,
             "step_name": "parsing",
             "progress": 30,
-            "message": f"✅ Extracted {len(elements)} elements",
+            "message": f"Extracted {len(elements)} elements",
             "elements_count": len(elements)
         }
         await asyncio.sleep(0.5)
@@ -287,7 +287,7 @@ async def process_pdf_background(
             "step": 3,
             "step_name": "ai_processing",
             "progress": 35,
-            "message": "🤖 Step 3: Processing chunks with AI (this may take a while)...",
+            "message": "Step 3: Processing chunks with AI (this may take a while)...",
             "total_chunks": len(elements)
         }
         
@@ -317,7 +317,7 @@ async def process_pdf_background(
             "step": 3,
             "step_name": "ai_processing",
             "progress": 70,
-            "message": f"✅ Processed {len(documents)} chunks",
+            "message": f"Processed {len(documents)} chunks",
             "chunks_processed": len(documents),
             "images_extracted": image_count
         }
@@ -329,7 +329,7 @@ async def process_pdf_background(
             "step": 4,
             "step_name": "vectorization",
             "progress": 75,
-            "message": "🔮 Step 4: Creating vector embeddings..."
+            "message": "Step 4: Creating vector embeddings..."
         }
         
         vector_store_path = os.path.join(settings.CHROMA_DIR, document_id)
@@ -349,7 +349,7 @@ async def process_pdf_background(
             "step": 4,
             "step_name": "vectorization",
             "progress": 95,
-            "message": "✅ Vector store created"
+            "message": "Vector store created"
         }
         await asyncio.sleep(0.5)
         
@@ -357,7 +357,7 @@ async def process_pdf_background(
         processing_status[document_id] = {
             "status": "completed",
             "progress": 100,
-            "message": "✅ Processing complete!",
+            "message": "Processing complete!",
             "result": {
                 "document_id": document_id,
                 "chunks_processed": len(documents),
@@ -372,7 +372,7 @@ async def process_pdf_background(
         processing_status[document_id] = {
             "status": "failed",
             "progress": 0,
-            "message": f"❌ Error: {str(e)}"
+            "message": f"Error: {str(e)}"
         }
         print(f"Error processing PDF: {e}")
 

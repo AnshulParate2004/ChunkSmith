@@ -52,7 +52,6 @@ class ChatAgent:
         
         # System prompt
         self.system_prompt = """You are a helpful AI assistant that answers questions based on document content.
-
 INSTRUCTIONS:
 1. Use the provided context from the document to answer questions
 2. When images are RELEVANT and would help answer the question, mention them using this EXACT format:
@@ -88,12 +87,48 @@ Answer the user's question based on the context and conversation history."""
             query=query,
             k=k
         )
-        
+                
+        # clean_json = [
+        #     {
+        #         "chunk_index": doc.metadata.get("chunk_index"),
+        #         "enhanced_content": doc.page_content,
+        #         "original_text": doc.metadata.get("original_text", ""),
+        #         "raw_tables_html": doc.metadata.get("raw_tables_html", []),
+        #         "ai_questions": doc.metadata.get("ai_questions", ""),
+        #         "ai_summary": doc.metadata.get("ai_summary", ""),
+        #         "image_interpretation": doc.metadata.get("image_interpretation", ""),
+        #         "table_interpretation": doc.metadata.get("table_interpretation", ""),
+        #         "image_paths": doc.metadata.get("image_paths", []),
+        #         "image_base64": doc.metadata.get("image_base64", []),
+        #         "page_numbers": doc.metadata.get("page_numbers", []),
+        #         "content_types": doc.metadata.get("content_types", []),
+        #     }
+        #     for doc in data
+        # ]
+
+        # doc = Document(
+        #         page_content=combined_content,
+        #         metadata={
+        #             "chunk_index": i,
+        #             "original_text": content_data['text'],
+        #             "raw_tables_html": content_data['tables'],
+        #             "ai_questions": ai_response.question,
+        #             "ai_summary": ai_response.summary,
+        #             "image_interpretation": ai_response.image_interpretation,
+        #             "table_interpretation": ai_response.table_interpretation,
+        #             "image_paths": content_data['images_dirpath'],
+        #             "image_base64": content_data['image_base64'],
+        #             "page_numbers": content_data['page_no'],
+        #             "content_types": content_data['types'],
+        #         }
+        #     )
+        print(f"Found {len(results)} relevant context chunks for query: '{query}'")
+        print("Retrieved chunk indices:'{results}'")
         context_chunks = []
         for doc in results:
             chunk_data = {
+
                 "content": doc.page_content,
-                "metadata": doc.metadata,
                 "original_text": doc.metadata.get("original_text", ""),
                 "ai_summary": doc.metadata.get("ai_summary", ""),
                 "image_paths": json.loads(doc.metadata.get("image_paths", "[]")) if isinstance(doc.metadata.get("image_paths"), str) else doc.metadata.get("image_paths", []),
@@ -162,8 +197,8 @@ Answer the user's question based on the context and conversation history."""
             return "No previous conversation"
         
         history = []
-        for msg in self.conversation_history[-6:]:  # Last 3 exchanges
-            role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+        for msg in self.conversation_history[-3:]:  # Last 3 exchanges
+            role = "[User]" if isinstance(msg, HumanMessage) else "[Assistant]"
             history.append(f"{role}: {msg.content}")
         
         return "\n".join(history)
@@ -229,7 +264,7 @@ Answer the user's question based on the context and conversation history."""
                 "data": {"message": "Searching document for relevant information..."}
             }
             
-            context_chunks = self.search_relevant_context(user_message, k=5)
+            context_chunks = self.search_relevant_context(user_message, k=2)
             
             yield {
                 "type": "search_complete",

@@ -17,9 +17,8 @@ class AIParser(BaseModel):
     """AI Parser Model for text, image and table information"""
     question: str = Field(description="List all potential questions that can be answered from this content (text, images, tables). Try to keep words similar to original content")
     summary: str = Field(description="Comprehensive summary of all data and information. Try to keep words similar to original content")
-    image_interpretation: str = Field(description="Detailed description of image content. If images are irrelevant or contain only decorative elements, state: ***DO NOT USE THIS IMAGE***")
-    table_interpretation: str = Field(description="Detailed description of table content. If tables are irrelevant, state: ***DO NOT USE THIS TABLE***")
-
+    image_interpretation: List[str] = Field(description="List matching the order of input images; image_interpretation[i] describes image i, use ***DO NOT USE THIS IMAGE*** for irrelevant images, and return an empty list if no images are provided.")
+    table_interpretation: List[str] = Field(description="List matching the order of input tables; table_interpretation[i] describes table i, use ***DO NOT USE THIS TABLE*** for irrelevant tables, and return an empty list if no tables are provided.")
 
 class ContentProcessor:
     """Processes document chunks with AI-enhanced summaries using multiple API keys"""
@@ -28,22 +27,22 @@ class ContentProcessor:
         self.image_dir = image_dir
         self.model_name = model_name
         self.temperature = temperature
-        
+
         # Load all available API keys from environment
         self.api_keys = self._load_api_keys()
         
         if not self.api_keys:
             raise ValueError("No GOOGLE_API_KEY found in environment")
         
-        print(f"✅ Initialized ContentProcessor with {len(self.api_keys)} API keys")
-        print(f"✅ Model: {model_name}")
+        print(f"Initialized ContentProcessor with {len(self.api_keys)} API keys")
+        print(f"Model: {model_name}")
         
         Path(image_dir).mkdir(parents=True, exist_ok=True)
     
     def _load_api_keys(self) -> List[str]:
         """
         Load all available Google API keys from environment
-        Looks for GOOGLE_API_KEY_1 through GOOGLE_API_KEY_10
+        Looks for GOOGLE_API_KEY_1 through GOOGLE_API_KEY_n
         Falls back to GOOGLE_API_KEY if numbered keys not found
         
         Returns:
@@ -100,7 +99,7 @@ class ContentProcessor:
             (settings.CHROMA_DIR, "*", "ChromaDB data")
         ]
         
-        print("\n🧹 Cleaning workspace before processing new PDF...")
+        print("\nCleaning workspace before processing new PDF...")
         print("="*60)
         
         for directory, pattern, description in directories_to_clean:
@@ -117,9 +116,9 @@ class ContentProcessor:
                             import shutil
                             shutil.rmtree(item)
                             deleted_count += 1
-                            print(f"  🗑️  Deleted ChromaDB collection: {item.name}")
+                            print(f"[VB Deleted] Deleted ChromaDB collection: {item.name}")
                         except Exception as e:
-                            print(f"  ⚠️  Could not delete {item.name}: {e}")
+                            print(f"[]Could not delete {item.name}: {e}")
             else:
                 # For other directories, delete matching files
                 for file in directory.glob(pattern):
@@ -128,13 +127,13 @@ class ContentProcessor:
                             file.unlink()
                             deleted_count += 1
                         except Exception as e:
-                            print(f"  ⚠️  Could not delete {file.name}: {e}")
+                            print(f"Could not delete {file.name}: {e}")
             
             if deleted_count > 0:
-                print(f"  ✅ Deleted {deleted_count} {description}")
+                print(f"Deleted {deleted_count} {description}")
         
         print("="*60)
-        print("✅ Workspace cleaned successfully!\n")
+        print("Workspace cleaned successfully!\n")
     
     def separate_content_types(self, chunk, image_counter: dict) -> Dict:
         """
@@ -172,7 +171,8 @@ class ContentProcessor:
                 table_html = getattr(element.metadata, 'text_as_html', element.text)
                 content_data['tables'].append(table_html)
 
-            # Handle images
+            # Handle images by saving image in dir and storing relative path
+            # Also keep base64 for AI processing
             elif element_type == 'Image':
                 if hasattr(element.metadata, 'image_base64'):
                     if 'image' not in content_data['types']:
@@ -197,11 +197,11 @@ class ContentProcessor:
                         # Keep base64 for AI processing
                         content_data['image_base64'].append(image_base64)
 
-                        print(f"     ✅ Saved: {relative_path}")
+                        print(f"Saved: {relative_path}")
                         image_counter['count'] += 1
 
                     except Exception as e:
-                        print(f"     ❌ Failed to save image {image_counter['count']}: {e}")
+                        print(f"Failed to save image {image_counter['count']}: {e}")
 
         return content_data
     
@@ -230,20 +230,6 @@ class ContentProcessor:
         try:
             # Build prompt
             prompt_text = f"""You are creating a searchable description for document content retrieval.
-
-CONTENT TO ANALYZE:
-
-TEXT CONTENT:
-{text}
-
-"""
-            
-            if tables:
-                prompt_text += "TABLES:\n"
-                for i, table in enumerate(tables, 1):
-                    prompt_text += f"Table {i}:\n{table}\n\n"
-            
-            prompt_text += """
 YOUR TASK:
 Generate a comprehensive, searchable description that covers:
 
@@ -259,13 +245,27 @@ Keep words similar to the original content for better search accuracy.
 IMPORTANT: Return structured output with these fields:
 - question: All potential questions this content answers
 - summary: Comprehensive summary of all information
-- image_interpretation: Description of images (or "***DO NOT USE THIS IMAGE***" if irrelevant)
-- table_interpretation: Description of tables (or "***DO NOT USE THIS TABLE***" if irrelevant)
-"""
+- image_interpretation: List matching the order of input images; image_interpretation[i] describes image i, use ***DO NOT USE THIS IMAGE*** for irrelevant images, and return an empty list if no images are provided.
+- table_interpretation: List matching the order of input tables; table_interpretation[i] describes table i, use ***DO NOT USE THIS TABLE*** for irrelevant tables, and return an empty list if no tables are provided.
 
+CONTENT TO ANALYZE:
+
+TEXT CONTENT:
+{text}
+
+"""
+            if tables:
+                prompt_text += "TABLES:\n"
+                for i, table in enumerate(tables, 1):
+                    prompt_text += f"Table {i}:\n{table}\n\n"
+            
             message_content = [{"type": "text", "text": prompt_text}]
             
-            for img_b64 in images:
+            for idx , img_b64 in enumerate(images,start=0):
+                message_content.append({
+                    "type": "text", 
+                    "text": f"Image {idx + 1}:"
+                })
                 message_content.append({
                     "type": "image_url",
                     "image_url": {"url": f"data:image/png;base64,{img_b64}"}
@@ -277,16 +277,16 @@ IMPORTANT: Return structured output with these fields:
             llm_structured = self._get_llm_for_key(api_key)
             
             # Make async API call
-            print(f"     🔄 Chunk {chunk_index}: Sending to API (key #{self.api_keys.index(api_key) + 1})")
+            print(f"Chunk {chunk_index}: Sending to API (key #{self.api_keys.index(api_key) + 1})")
             response = await llm_structured.ainvoke([message])
-            print(f"     ✅ Chunk {chunk_index}: Response received")
+            print(f"Chunk {chunk_index}: Response received")
             
             return response
                 
         except Exception as e:
             # Return fallback on any error
-            print(f"     ❌ Chunk {chunk_index}: Error - {str(e)[:100]}")
-            print(f"     ⚠️  Chunk {chunk_index}: Using fallback summary")
+            print(f"Chunk {chunk_index}: Error - {str(e)[:100]}")
+            print(f"Chunk {chunk_index}: Using fallback summary")
             
             fallback_summary = f"{text[:300]}..."
             if tables:
@@ -297,8 +297,8 @@ IMPORTANT: Return structured output with these fields:
             return AIParser(
                 question="Unable to generate questions due to processing error",
                 summary=fallback_summary,
-                image_interpretation="***DO NOT USE THIS IMAGE***" if images else "No images present",
-                table_interpretation="***DO NOT USE THIS TABLE***" if tables else "No tables present"
+                image_interpretation=["***DO NOT USE THIS IMAGE***" for _ in images] if images else [],
+                table_interpretation=["***DO NOT USE THIS TABLE***" for _ in tables] if tables else []
             )
     
     async def process_chunks_async(self, chunks_data: List[Dict]) -> List[AIParser]:
@@ -329,9 +329,9 @@ IMPORTANT: Return structured output with these fields:
             tasks.append(task)
         
         # Run all tasks concurrently
-        print(f"\n🚀 Processing {len(tasks)} chunks asynchronously with {min(len(tasks), len(self.api_keys))} API keys...")
+        print(f"\nProcessing {len(tasks)} chunks asynchronously with {min(len(tasks), len(self.api_keys))} API keys...")
         responses = await asyncio.gather(*tasks)
-        print(f"✅ All {len(responses)} chunks processed!\n")
+        print(f"All {len(responses)} chunks processed!\n")
         
         return responses
     
@@ -345,7 +345,7 @@ IMPORTANT: Return structured output with these fields:
         Returns:
             List of LangChain Documents with enhanced summaries
         """
-        print("🧠 Processing chunks with AI Summaries (Multi-API Async Mode)...")
+        print("Processing chunks with AI Summaries (Multi-API Async Mode)...")
         
         # Clean entire workspace before processing
         from config.settings import settings
@@ -355,17 +355,17 @@ IMPORTANT: Return structured output with these fields:
         image_counter = {'count': 1}
         
         # Step 1: Extract content from all chunks (synchronous)
-        print(f"\n📦 Extracting content from {total_chunks} chunks...")
+        print(f"\nExtracting content from {total_chunks} chunks...")
         chunks_data = []
         
         for i, chunk in enumerate(chunks, 1):
-            print(f"   📄 Extracting chunk {i}/{total_chunks}")
+            print(f"Extracting chunk {i}/{total_chunks}")
             
             # Analyze chunk content
             content_data = self.separate_content_types(chunk, image_counter)
             
             # Debug info
-            print(f"     Types: {', '.join(content_data['types'])}, "
+            print(f"Types: {', '.join(content_data['types'])}, "
                   f"Tables: {len(content_data['tables'])}, "
                   f"Images: {len(content_data['image_base64'])}")
             if content_data['page_no']:
@@ -373,11 +373,11 @@ IMPORTANT: Return structured output with these fields:
             
             chunks_data.append(content_data)
         
-        print(f"\n✅ Content extraction complete!")
-        print(f"📊 Total images saved: {image_counter['count'] - 1}")
+        print(f"\nContent extraction complete!")
+        print(f"Total images saved: {image_counter['count'] - 1}")
         
         # Step 2: Process all chunks asynchronously with different API keys
-        print(f"\n🔮 Starting async AI processing...")
+        print(f"\nStarting async AI processing...")
         print(f"   Using {len(self.api_keys)} API key(s)")
         print(f"   Processing {total_chunks} chunk(s)")
         
@@ -385,20 +385,31 @@ IMPORTANT: Return structured output with these fields:
         ai_responses = asyncio.run(self.process_chunks_async(chunks_data))
         
         # Step 3: Create LangChain documents
-        print(f"\n📚 Creating LangChain documents...")
+        print(f"\nCreating LangChain documents...")
         langchain_documents = []
         
-        for i, (content_data, ai_response) in enumerate(zip(chunks_data, ai_responses), 1):
+        for idx, (content_data, ai_response) in enumerate(zip(chunks_data, ai_responses), 1):
             # Create combined searchable content
+            # Prepare image analysis text as string with image path and interpretation
+            # For images
+            img_analysis_text = "\n".join(
+                [f"Image Path {content_data['images_dirpath'][i]}: {ai_response.image_interpretation[i]}" 
+                for i in range(len(ai_response.image_interpretation))]
+            ) if ai_response.image_interpretation else "No images found"
+
+            # For tables
+            table_analysis_text = "\n".join(
+                [f"Table index {i} chunk index {idx}: {ai_response.table_interpretation[i]}"
+                for i in range(len(ai_response.table_interpretation))]
+            ) if ai_response.table_interpretation else "No tables found"
+
+
             combined_content = f"""QUESTIONS: {ai_response.question}
-
 SUMMARY: {ai_response.summary}
-
-IMAGE ANALYSIS: {ai_response.image_interpretation}
-
-TABLE ANALYSIS: {ai_response.table_interpretation}"""
+IMAGE ANALYSIS: {img_analysis_text}
+TABLE ANALYSIS: {table_analysis_text}"""
             
-            print(f"   📄 Document {i}: {ai_response.summary[:100]}...")
+            print(f"Document {i}: {ai_response.summary[:100]}...")
             
             # Create LangChain Document with metadata
             doc = Document(
@@ -412,6 +423,7 @@ TABLE ANALYSIS: {ai_response.table_interpretation}"""
                     "image_interpretation": ai_response.image_interpretation,
                     "table_interpretation": ai_response.table_interpretation,
                     "image_paths": content_data['images_dirpath'],
+                    "image_base64": content_data['image_base64'],
                     "page_numbers": content_data['page_no'],
                     "content_types": content_data['types'],
                 }
@@ -419,7 +431,7 @@ TABLE ANALYSIS: {ai_response.table_interpretation}"""
             
             langchain_documents.append(doc)
         
-        print(f"\n✅ Successfully processed {len(langchain_documents)} chunks")
-        print(f"⚡ Used async processing with {len(self.api_keys)} API key(s)")
+        print(f"\nSuccessfully processed {len(langchain_documents)} chunks")
+        print(f"Used async processing with {len(self.api_keys)} API key(s)")
         
         return langchain_documents
